@@ -1,0 +1,37 @@
+# One namespace per Islamic business area + isb-system for platform pieces.
+# Fully separate from the conventional landscape's bian-* namespaces.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: isb-system
+  labels: { islamic-platform/routes-allowed: "true" }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: isb-governance
+  labels: { isb/business-area: shariah-governance-and-compliance, islamic-platform/routes-allowed: "true" }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: isb-deposits
+  labels: { isb/business-area: deposits-and-investment-accounts, islamic-platform/routes-allowed: "true" }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: isb-financing
+  labels: { isb/business-area: islamic-financing, islamic-platform/routes-allowed: "true" }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: isb-treasury
+  labels: { isb/business-area: treasury-markets-and-sukuk, islamic-platform/routes-allowed: "true" }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: isb-operations
+  labels: { isb/business-area: takaful-and-shared-operations, islamic-platform/routes-allowed: "true" }

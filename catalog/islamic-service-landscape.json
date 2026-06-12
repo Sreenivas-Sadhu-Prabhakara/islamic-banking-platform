@@ -1,0 +1,131 @@
+{
+  "version": "1.0.0",
+  "title": "Islamic Banking Service Landscape",
+  "note": "Source of truth for the ISOLATED Islamic banking landscape. Modelled in the BIAN service-domain style but Shariah-native: no interest-bearing constructs — profit-sharing (Mudarabah/Musharakah), cost-plus sale (Murabaha), leasing (Ijara), and fee-based (Ujrah/Wakala) structures instead. Completely separate from the conventional landscape: own repos (isb-*), own template, own namespaces.",
+  "functionalPatterns": ["Direct","Manage","Administer","Process","Operate","Maintain","Catalog","Monitor","Fulfill","Assess","Distribute"],
+  "businessAreas": [
+    {
+      "name": "Shariah Governance and Compliance",
+      "businessDomains": [
+        {
+          "name": "Shariah Governance",
+          "serviceDomains": [
+            {"name": "Shariah Supervisory Board Directory", "functionalPattern": "Catalog", "assetType": "SSB Member Mandate"},
+            {"name": "Fatwa And Ruling Repository", "functionalPattern": "Catalog", "assetType": "Shariah Ruling"},
+            {"name": "Shariah Compliance Review", "functionalPattern": "Assess", "assetType": "Shariah Compliance Case"},
+            {"name": "Shariah Audit", "functionalPattern": "Assess", "assetType": "Shariah Audit Engagement"},
+            {"name": "Income Purification", "functionalPattern": "Process", "assetType": "Purification Entry"},
+            {"name": "Zakat Calculation", "functionalPattern": "Process", "assetType": "Zakat Assessment"},
+            {"name": "Zakat Distribution", "functionalPattern": "Distribute", "assetType": "Zakat Disbursement"},
+            {"name": "Sadaqah And Charity Management", "functionalPattern": "Manage", "assetType": "Charity Pool"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Deposits and Investment Accounts",
+      "businessDomains": [
+        {
+          "name": "Islamic Deposits",
+          "serviceDomains": [
+            {"name": "Wadiah Safekeeping Account", "functionalPattern": "Fulfill", "assetType": "Wadiah Custody Account"},
+            {"name": "Qard Hassan Account", "functionalPattern": "Fulfill", "assetType": "Qard Hassan Account"},
+            {"name": "Mudarabah Savings Account", "functionalPattern": "Fulfill", "assetType": "Mudarabah Savings Account"},
+            {"name": "Mudarabah Term Investment Account", "functionalPattern": "Fulfill", "assetType": "Mudarabah Investment Account"},
+            {"name": "Wakala Investment Account", "functionalPattern": "Fulfill", "assetType": "Wakala Investment Account"}
+          ]
+        },
+        {
+          "name": "Profit Management",
+          "serviceDomains": [
+            {"name": "Profit Calculation And Distribution", "functionalPattern": "Process", "assetType": "Profit Distribution Run"},
+            {"name": "Profit Equalization Reserve", "functionalPattern": "Manage", "assetType": "Profit Equalization Reserve"},
+            {"name": "Investment Risk Reserve", "functionalPattern": "Manage", "assetType": "Investment Risk Reserve"},
+            {"name": "Hibah Discretionary Gift", "functionalPattern": "Process", "assetType": "Hibah Award"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Islamic Financing",
+      "businessDomains": [
+        {
+          "name": "Sale Based Financing",
+          "serviceDomains": [
+            {"name": "Murabaha Financing", "functionalPattern": "Fulfill", "assetType": "Murabaha Facility"},
+            {"name": "Commodity Murabaha Tawarruq", "functionalPattern": "Process", "assetType": "Tawarruq Transaction"},
+            {"name": "Istisna Construction Financing", "functionalPattern": "Fulfill", "assetType": "Istisna Facility"},
+            {"name": "Salam Commodity Forward", "functionalPattern": "Fulfill", "assetType": "Salam Contract"},
+            {"name": "Asset Acquisition Agency", "functionalPattern": "Process", "assetType": "Wakala Purchase Mandate"}
+          ]
+        },
+        {
+          "name": "Lease And Partnership Financing",
+          "serviceDomains": [
+            {"name": "Ijara Leasing", "functionalPattern": "Fulfill", "assetType": "Ijara Lease"},
+            {"name": "Ijara Muntahia Bittamleek", "functionalPattern": "Fulfill", "assetType": "Lease To Own Arrangement"},
+            {"name": "Diminishing Musharakah Home Finance", "functionalPattern": "Fulfill", "assetType": "Diminishing Musharakah Facility"},
+            {"name": "Musharakah Partnership Financing", "functionalPattern": "Fulfill", "assetType": "Musharakah Facility"},
+            {"name": "Mudarabah Venture Financing", "functionalPattern": "Fulfill", "assetType": "Mudarabah Facility"},
+            {"name": "Qard Hassan Benevolent Loan", "functionalPattern": "Fulfill", "assetType": "Qard Hassan Facility"},
+            {"name": "Late Payment Charity Handling", "functionalPattern": "Process", "assetType": "Late Payment Charity Entry"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Treasury Markets and Sukuk",
+      "businessDomains": [
+        {
+          "name": "Sukuk",
+          "serviceDomains": [
+            {"name": "Sukuk Issuance", "functionalPattern": "Process", "assetType": "Sukuk Issuance Program"},
+            {"name": "Sukuk Registry And Custody", "functionalPattern": "Administer", "assetType": "Sukuk Holding"},
+            {"name": "Sukuk Portfolio Management", "functionalPattern": "Manage", "assetType": "Sukuk Portfolio"}
+          ]
+        },
+        {
+          "name": "Islamic Treasury",
+          "serviceDomains": [
+            {"name": "Interbank Commodity Murabaha Desk", "functionalPattern": "Operate", "assetType": "Interbank Murabaha Deal"},
+            {"name": "Islamic FX Wad Arrangements", "functionalPattern": "Process", "assetType": "Wad FX Arrangement"},
+            {"name": "Shariah Compliant Liquidity Management", "functionalPattern": "Manage", "assetType": "Liquidity Position"},
+            {"name": "Halal Equity Screening", "functionalPattern": "Assess", "assetType": "Equity Screening Result"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Takaful and Shared Operations",
+      "businessDomains": [
+        {
+          "name": "Takaful",
+          "serviceDomains": [
+            {"name": "Takaful Policy Administration", "functionalPattern": "Administer", "assetType": "Takaful Certificate"},
+            {"name": "Takaful Claims Processing", "functionalPattern": "Process", "assetType": "Takaful Claim"},
+            {"name": "Retakaful Arrangement", "functionalPattern": "Manage", "assetType": "Retakaful Treaty"}
+          ]
+        },
+        {
+          "name": "Islamic Cards and Payments",
+          "serviceDomains": [
+            {"name": "Ujrah Card Services", "functionalPattern": "Fulfill", "assetType": "Ujrah Card Facility"},
+            {"name": "Payment Order", "functionalPattern": "Process", "assetType": "Payment Order"},
+            {"name": "Payment Execution", "functionalPattern": "Process", "assetType": "Payment Transaction"}
+          ]
+        },
+        {
+          "name": "Shared Operations",
+          "serviceDomains": [
+            {"name": "Customer Reference Data", "functionalPattern": "Maintain", "assetType": "Customer Reference Data"},
+            {"name": "KYC And Shariah Screening", "functionalPattern": "Process", "assetType": "KYC Shariah Assessment"},
+            {"name": "Financial Crime Monitoring", "functionalPattern": "Monitor", "assetType": "Financial Crime Alert"},
+            {"name": "AAOIFI Financial Accounting", "functionalPattern": "Process", "assetType": "AAOIFI Ledger Posting"},
+            {"name": "IFSB Regulatory Reporting", "functionalPattern": "Process", "assetType": "IFSB Regulatory Report"},
+            {"name": "Branch And Digital Channel Operation", "functionalPattern": "Operate", "assetType": "Channel Session"}
+          ]
+        }
+      ]
+    }
+  ]
+}

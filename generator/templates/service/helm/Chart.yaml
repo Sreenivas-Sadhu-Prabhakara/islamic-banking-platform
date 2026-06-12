@@ -1,0 +1,14 @@
+apiVersion: v2
+name: __ARTIFACT_ID__
+description: "BIAN Service Domain: __SD_NAME__ (__FUNCTIONAL_PATTERN__ pattern, __BUSINESS_AREA__)"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - islamic-banking
+  - __FUNCTIONAL_PATTERN_SLUG__
+annotations:
+  isb/business-area: "__BUSINESS_AREA__"
+  isb/business-domain: "__BUSINESS_DOMAIN__"
+  isb/asset-type: "__ASSET_TYPE__"
+  isb/control-record: "__CONTROL_RECORD__"
