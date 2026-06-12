@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Islamic Banking Platform — 48 Shariah-native service domains</title>
+  <meta name="description" content="A Shariah-compliant core-banking microservice landscape: Murabaha, Mudarabah, Ijara, Sukuk, Takaful, Zakat — fully isolated from conventional banking. Interactive documentation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Manrope:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="#top"><span class="brand-star">✦</span> ISLAMIC BANKING PLATFORM</a>
+  <nav class="nav">
+    <a href="#principles">Principles</a>
+    <a href="#mapper">Conventional → Islamic</a>
+    <a href="#explorer">48 Domains</a>
+    <a href="#calculators">Try the math</a>
+    <a href="#isolation">Isolation</a>
+    <a href="#run">Run it</a>
+  </nav>
+  <a class="gh" href="catalog.html">Master Catalog</a>
+  <a class="gh" href="https://github.com/Sreenivas-Sadhu-Prabhakara/islamic-banking-platform" target="_blank" rel="noopener">GitHub ↗</a>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <p class="eyebrow">A SHARIAH-NATIVE CORE-BANKING LANDSCAPE · BIAN-STYLE SERVICE DOMAINS · FULLY ISOLATED</p>
+    <h1>Banking without riba.<br/><span class="accent">48 service domains,</span><br/>built Shariah-first.</h1>
+    <p class="hero-sub">Not a conventional bank with renamed products — a landscape whose primitives <em>are</em> the Islamic contracts: profit-sharing <strong>Mudarabah</strong> instead of interest, cost-plus <strong>Murabaha</strong> instead of loans, <strong>Ijara</strong> leasing, <strong>Sukuk</strong>, <strong>Takaful</strong>, and a mandatory <strong>Shariah-governance</strong> layer. One microservice repository per domain.</p>
+    <div class="statline">
+      <div class="stat"><b>48</b><span>service domains<br/>(one repo each)</span></div>
+      <div class="stat"><b>5</b><span>business areas<br/>= 5 namespaces</span></div>
+      <div class="stat"><b>0</b><span>interest-bearing<br/>constructs</span></div>
+      <div class="stat"><b>0</b><span>code shared with the<br/>conventional platform</span></div>
+      <div class="stat"><b>100%</b><span>contract-tested<br/>repos</span></div>
+    </div>
+  </section>
+
+  <!-- PRINCIPLES -->
+  <section id="principles" class="band">
+    <h2><span class="no">01</span>The principles, encoded</h2>
+    <p class="intro">Four rules of Islamic finance shape every domain in this landscape — click each to see where it lives in the code.</p>
+    <div class="prin-grid" id="prin-grid">
+      <button class="prin" data-p="riba">
+        <h3>No riba (interest)</h3>
+        <p>Money may not earn money by time alone. Returns must come from trade, assets, or shared risk.</p>
+      </button>
+      <button class="prin" data-p="gharar">
+        <h3>No gharar (excessive uncertainty)</h3>
+        <p>Contracts must be specified: asset, price, delivery. No selling what you don't own or can't define.</p>
+      </button>
+      <button class="prin" data-p="risk">
+        <h3>Risk &amp; profit sharing</h3>
+        <p>Profit belongs to whoever bears the risk. Losses fall on capital, not on the entrepreneur's effort.</p>
+      </button>
+      <button class="prin" data-p="halal">
+        <h3>Halal purposes &amp; governance</h3>
+        <p>Financing only for permissible activities, supervised by a Shariah board with audit and purification.</p>
+      </button>
+    </div>
+    <div class="prin-detail" id="prin-detail"></div>
+  </section>
+
+  <!-- MAPPER -->
+  <section id="mapper" class="band band-alt">
+    <h2><span class="no">02</span>Conventional → Islamic mapper</h2>
+    <p class="intro">Pick a conventional banking product. See the Shariah-compliant structure that replaces it, how it actually differs, and the repo that implements it.</p>
+    <div class="mapper">
+      <div class="mapper-buttons" id="mapper-buttons"></div>
+      <div class="mapper-out" id="mapper-out"></div>
+    </div>
+  </section>
+
+  <!-- EXPLORER -->
+  <section id="explorer" class="band">
+    <h2><span class="no">03</span>Service Domain Explorer</h2>
+    <p class="intro">All 48 Shariah-native domains — searchable. Each row is its own isolated GitHub repository.</p>
+    <div class="explorer-controls">
+      <input type="search" id="ex-search" placeholder="Search 48 domains… (e.g. murabaha, sukuk, zakat)" aria-label="Search" />
+      <select id="ex-area" aria-label="Filter by business area"><option value="">All business areas</option></select>
+    </div>
+    <p class="ex-count" id="ex-count"></p>
+    <div class="ex-table-wrap">
+      <table class="ex-table">
+        <thead><tr><th>Service domain</th><th>Area / domain</th><th>Pattern</th><th>Control record</th><th>Repo</th></tr></thead>
+        <tbody id="ex-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- CALCULATORS -->
+  <section id="calculators" class="band band-alt">
+    <h2><span class="no">04</span>Try the math — live</h2>
+
+    <div class="calc">
+      <h3>📈 Mudarabah profit distribution <small>how savings earn without interest</small></h3>
+      <p>The pool's <em>actual</em> profit is shared: the bank takes its agreed Mudarib share for managing the pool; the rest is distributed to account holders by weighted balances. No profit, no payout — that's the deal.</p>
+      <div class="calc-grid">
+        <div class="calc-in">
+          <label>Pool profit this month (₹)<input type="number" id="md-profit" value="2000000" /></label>
+          <label>Total pool weighted balance (₹)<input type="number" id="md-pool" value="1000000000" /></label>
+          <label>Your average balance (₹)<input type="number" id="md-bal" value="100000" /></label>
+          <label>Mudarib (bank) share %<input type="number" id="md-share" value="30" min="0" max="100" /></label>
+        </div>
+        <div class="calc-out" id="md-out"></div>
+      </div>
+    </div>
+
+    <div class="calc">
+      <h3>🏠 Murabaha schedule <small>cost-plus sale, not a loan</small></h3>
+      <p>The bank buys the asset and sells it to you at <strong>cost + disclosed markup</strong>. The total price is <strong>fixed at contract</strong> — installments never recompound, and late payment goes to charity, never to the bank.</p>
+      <div class="calc-grid">
+        <div class="calc-in">
+          <label>Asset cost (₹)<input type="number" id="mu-cost" value="1000000" /></label>
+          <label>Agreed markup %<input type="number" id="mu-markup" value="12" min="0" /></label>
+          <label>Tenor (months)<input type="number" id="mu-months" value="24" min="1" /></label>
+        </div>
+        <div class="calc-out" id="mu-out"></div>
+      </div>
+    </div>
+
+    <div class="calc">
+      <h3>🌙 Zakat estimator <small>the obligatory levy the platform computes</small></h3>
+      <p>Zakat applies at <strong>2.5%</strong> on zakatable wealth held a lunar year, if it exceeds the <em>nisab</em> (≈ 85g gold).</p>
+      <div class="calc-grid">
+        <div class="calc-in">
+          <label>Zakatable assets (cash, gold, investments) (₹)<input type="number" id="zk-assets" value="800000" /></label>
+          <label>Deductible liabilities due now (₹)<input type="number" id="zk-liab" value="50000" /></label>
+          <label>Gold price ₹/gram (sets nisab)<input type="number" id="zk-gold" value="7000" /></label>
+        </div>
+        <div class="calc-out" id="zk-out"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ISOLATION -->
+  <section id="isolation" class="band">
+    <h2><span class="no">05</span>Total isolation, by construction</h2>
+    <p class="intro">This landscape shares <strong>no code, no repos, no namespaces, no events</strong> with the conventional <a href="https://sreenivas-sadhu-prabhakara.github.io/bian-platform/" target="_blank" rel="noopener">bian-platform</a>. Mixing the two is impossible by accident:</p>
+    <div class="iso-table-wrap">
+      <table class="iso-table">
+        <thead><tr><th></th><th>Conventional</th><th>Islamic (this)</th></tr></thead>
+        <tbody>
+          <tr><td>Repositories</td><td><code>sd-*</code></td><td><code>isb-*</code></td></tr>
+          <tr><td>Java packages</td><td><code>com.bank.bian</code></td><td><code>com.bank.islamic</code></td></tr>
+          <tr><td>Event topics</td><td><code>bian.*</code></td><td><code>isb.*</code></td></tr>
+          <tr><td>K8s namespaces</td><td><code>bian-*</code></td><td><code>isb-*</code></td></tr>
+          <tr><td>Mesh identity</td><td><code>part-of: bian-platform</code></td><td><code>part-of: islamic-platform</code></td></tr>
+          <tr><td>Catalog · template · generator</td><td>own</td><td><strong>own, separate copies</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- RUN -->
+  <section id="run" class="band band-alt">
+    <h2><span class="no">06</span>Run it yourself</h2>
+    <div class="run-grid">
+      <div class="run-card"><h3>Any domain, standalone, in 10s</h3>
+<pre data-copy><code>git clone https://github.com/Sreenivas-Sadhu-Prabhakara/isb-murabaha-financing
+mvn -f isb-murabaha-financing spring-boot:run
+open http://localhost:8080/swagger-ui.html</code></pre></div>
+      <div class="run-card"><h3>The whole landscape from one catalog</h3>
+<pre data-copy><code>git clone https://github.com/Sreenivas-Sadhu-Prabhakara/islamic-banking-platform
+python3 islamic-banking-platform/generator/generate.py</code></pre></div>
+      <div class="run-card"><h3>Onto Kubernetes</h3>
+<pre data-copy><code>kubectl apply -f islamic-banking-platform/platform-infra/namespaces.yaml
+helm install isb-murabaha-financing \
+  islamic-banking-services/isb-murabaha-financing/helm -n isb-financing</code></pre></div>
+      <div class="run-card"><h3>Quality bar in every repo</h3>
+        <p class="run-quality">Per-repo OpenAPI + event contracts (<code>api/</code>) · a <strong>contract-test suite</strong> that fails the build when code and contract drift · Helm chart · CI on every push. Identical discipline to the conventional platform — independently applied.</p></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p>✦ Islamic Banking Platform — an educational reference implementation in the BIAN service-domain style.</p>
+  <p class="foot-dim">Actual Shariah compliance of any deployment requires certification by a qualified Shariah Supervisory Board. Standards referenced: AAOIFI, IFSB, IIFM.</p>
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
