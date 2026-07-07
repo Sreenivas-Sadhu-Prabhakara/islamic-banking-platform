@@ -1,0 +1,15 @@
+{
+  "name": "Islamic Banking Platform — 48 Shariah-native service domains",
+  "short_name": "Islamic Banking",
+  "description": "A Shariah-compliant core-banking microservice landscape across 48 service domains, fully isolated from conventional banking.",
+  "start_url": "/islamic-banking-platform/",
+  "scope": "/islamic-banking-platform/",
+  "display": "standalone",
+  "background_color": "#f6f2e7",
+  "theme_color": "#1c352b",
+  "icons": [
+    { "src": "/islamic-banking-platform/assets/favicon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/islamic-banking-platform/assets/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/islamic-banking-platform/assets/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" }
+  ]
+}

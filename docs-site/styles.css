@@ -192,4 +192,15 @@ pre code { color: inherit; font-size: 1em; }
 .foot { max-width: var(--maxw); margin: 0 auto; padding: 2.4rem 1.2rem 3.4rem; border-top: 3px double var(--rule); text-align: center; color: var(--ink-2); font-size: .9rem; }
 .foot-dim { color: var(--ink-3); font-size: .78rem; font-style: italic; }
 
+/* faq */
+.faq { max-width: 74ch; }
+.faq details { border: 1px solid var(--rule); border-left: 3px solid var(--gold); background: var(--card); border-radius: 2px; margin-bottom: .7rem; }
+.faq summary { list-style: none; cursor: pointer; position: relative; padding: .95rem 2.6rem .95rem 1.1rem; font-family: var(--serif-d); font-size: 1.16rem; color: var(--ink); }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); font-family: var(--mono); color: var(--gold); font-size: 1.3rem; }
+.faq details[open] summary::after { content: "\2013"; }
+.faq summary:hover { color: var(--wine); }
+.faq .ans { padding: 0 1.1rem 1.1rem; color: var(--ink-2); line-height: 1.72; max-width: 70ch; }
+.faq .ans strong { color: var(--ink); font-weight: 600; }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
