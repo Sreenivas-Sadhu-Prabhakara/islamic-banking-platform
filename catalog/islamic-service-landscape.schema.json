@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/islamic-banking-platform/catalog/islamic-service-landscape.schema.json",
+  "title": "Islamic Service Landscape — catalog schema v2",
+  "description": "The contract between catalog/islamic-service-landscape.json and generator/generate.py. Catalog v1 carried three fields per service domain {name, functionalPattern, assetType}, which is why all 48 generated services were byte-identical scaffolds: the generator had nothing per-domain to work from. v2 adds the per-domain data from which ONE template derives a real OpenAPI schema, a Flyway migration, a repository, a rules component and an AsyncAPI document. The 49th domain costs one entry in this file and nothing else.\n\nTHREE THINGS THIS SCHEMA EXISTS TO PREVENT:\n  1. a silent scaffold — generate.py validates against this schema and REFUSES to stamp a malformed entry rather than falling back to additionalProperties:true;\n  2. a float in a money path — `money` is int64 MINOR units and `ratio` is an exact integer pair, and neither has a decimal form anywhere in this schema;\n  3. a manufactured compliance claim — every `shariah` block is reviewed:false and every Shariah-bearing rule carries its citation, or it is reported as a gap.\n\nNOT A SHARIAH ARTEFACT. Nothing described by this schema has been reviewed by a Shariah supervisory board. Standards are cited by body and number; no clause was read from a primary text. See `shariahReview` at the root.",
+  "type": "object",
+  "required": ["version", "title", "functionalPatterns", "businessAreas"],
+  "properties": {
+    "version": {
+      "description": "Catalog schema version. '2.0.0' or later means every serviceDomain carries controlRecord/rules/events/shariah.",
+      "type": "string"
+    },
+    "title": { "type": "string" },
+    "note": { "type": "string" },
+    "catalogSchema": {
+      "description": "Filename of this schema, so a reader of the catalog can find its contract.",
+      "type": "string"
+    },
+    "mergedFrom": {
+      "description": "The design fragments catalog/merge_fragments.py folded in. Provenance, not configuration.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "shariahReview": {
+      "description": "The estate-wide honesty statement. reviewed MUST be false until a named SSB signs off; generate.py has no flag that overrides this.",
+      "type": "object",
+      "required": ["reviewed", "status"],
+      "properties": {
+        "reviewed": { "const": false },
+        "status": { "type": "string" },
+        "statement": { "type": "string" }
+      }
+    },
+    "functionalPatterns": {
+      "description": "The BIAN functional patterns in use. Every serviceDomain.functionalPattern must be one of these AND must be known to generate.py's PATTERN_NOUN table, or generation fails.",
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "businessAreas": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "businessDomains"],
+        "properties": {
+          "name": {
+            "description": "One Kubernetes namespace per business area — generate.py's AREA_NAMESPACE must have an entry for this exact string.",
+            "type": "string"
+          },
+          "businessDomains": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name", "serviceDomains"],
+              "properties": {
+                "name": { "type": "string" },
+                "serviceDomains": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "$ref": "#/$defs/serviceDomain" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+
+    "serviceDomain": {
+      "description": "One BIAN-style Islamic service domain = one generated repo (isb-<slug>). The first three properties are catalog v1 and are byte-compatible: an un-upgraded reader still sees {name, functionalPattern, assetType}.",
+      "type": "object",
+      "required": ["name", "functionalPattern", "assetType",
+                   "controlRecord", "rules", "events", "shariah"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "functionalPattern": { "type": "string", "minLength": 1 },
+        "assetType": { "type": "string", "minLength": 1 },
+        "businessArea": { "type": "string" },
+        "businessDomain": { "type": "string" },
+        "source": { "description": "Which design fragment this entry came from.", "type": "string" },
+        "summary": { "type": "string" },
+        "designNote": { "type": "string" },
+        "arithmetic": {},
+        "isTheGate": {},
+        "gateHonesty": {},
+        "openBankingMapping": {
+          "description": "How this domain's fields surface on the openbank-islamic sibling resource server (DESIGN.md §7 RULE 3). Never on an OBIE path: RULE 1 forbids extending OBIE's own schemas.",
+          "type": "object"
+        },
+        "controlRecord": { "$ref": "#/$defs/controlRecord" },
+        "behaviourQualifiers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/behaviourQualifier" }
+        },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/event" } },
+        "shariah": { "$ref": "#/$defs/shariah" },
+        "uncertain": {
+          "description": "What the designing agent could NOT model, in its own words. A reported gap, never invented detail. Copied verbatim into the generated repo's docs/SHARIAH-GAPS.md.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "controlRecord": {
+      "description": "The one BIAN control record this service domain manages. Generates: the OpenAPI ControlRecord schema (additionalProperties:false), the Flyway table, the JDBC repository and its RowMapper.",
+      "type": "object",
+      "required": ["name", "table", "primaryKey", "fields"],
+      "properties": {
+        "name": { "description": "BIAN control-record name, e.g. 'Mudarabah Savings Account Fulfillment Arrangement'.", "type": "string" },
+        "table": { "description": "snake_case Postgres table name. Must be unique within the repo.", "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "primaryKey": { "description": "Name of the field that is the table's PRIMARY KEY. Must be a field of type 'id'.", "type": "string" },
+        "stageField": { "description": "Name of the enum field carrying the contract stage, where the domain has a staged lifecycle (Murabaha promise → acquisition → sale).", "type": "string" },
+        "note": { "type": "string" },
+        "identifiers": { "description": "Derived: the subset of fields[] that are identifiers. Informational; fields[] is authoritative.", "type": "array", "items": { "type": "string" } },
+        "money": { "description": "Derived: the names of every field of type 'money'. Informational; fields[] is authoritative.", "type": "array", "items": { "type": "string" } },
+        "ratios": { "description": "Derived: the names of every field of type 'ratio'.", "type": "array", "items": { "type": "string" } },
+        "fields": {
+          "description": "THE authority. Everything the generator emits for this record is derived from here and nowhere else.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/field" }
+        }
+      }
+    },
+
+    "behaviourQualifier": {
+      "description": "A BIAN behaviour qualifier = a generated sub-resource (GET /v1/<cr>/{crId}/<path>) plus its own child table. `bianProvenance`/`bianBQ` records whether BIAN actually has this BQ: BIAN has no Islamic constructs at all, so most are BIAN-STYLED, not BIAN.",
+      "type": "object",
+      "required": ["name", "path", "table", "cardinality", "actions", "fields"],
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "description": "URL segment under the control record.", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "table": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "cardinality": { "type": "string" },
+        "actions": { "description": "BIAN action terms offered on the sub-resource.", "type": "array", "items": { "type": "string" } },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/field" } },
+        "noSchema": { "description": "true when the fragment described the BQ but gave it no fields. The generator emits NO table and NO path for it, and lists it in docs/RULES-GAPS.md. A documented intent is not a sub-resource.", "const": true },
+        "note": { "type": "string" },
+        "bianBQ": { "type": ["string", "null"] },
+        "bianProvenance": { "type": "string" },
+        "bianArchetype": { "type": "string" },
+        "backingField": { "type": "string" },
+        "evidence": { "type": "string" }
+      }
+    },
+
+    "field": {
+      "description": "One column / one OpenAPI property / one Java accessor. There is no 'free-form properties' escape hatch anywhere in schema v2 — that escape hatch is what produced 48 identical services.",
+      "type": "object",
+      "required": ["name", "type", "required"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+        "column": { "description": "Derived snake_case column name.", "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "type": { "$ref": "#/$defs/fieldType" },
+        "sourceType": { "description": "The type word the design fragment used, when it differed from the canonical one (e.g. 'moneyMinor' → 'money'). Audit trail for the normalisation.", "type": "string" },
+        "required": { "type": "boolean" },
+        "values": { "description": "REQUIRED when type is 'enum'. Becomes the OpenAPI enum and a SQL CHECK (col IN (...)).", "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "const": { "description": "The field may hold only this value. Becomes a single-valued OpenAPI enum and a SQL CHECK. This is how 'capitalAtRisk is not a product option' is expressed as code." },
+        "default": {},
+        "refDomain": { "description": "REQUIRED when type is 'ref': the service domain that owns the referenced record. NEVER a SQL FOREIGN KEY — each service domain owns its own schema, and referential integrity is the caller's, asserted by contract tests.", "type": "string" },
+        "currencyField": { "description": "For type 'money': the name of the field carrying the ISO 4217 alpha-3 code for THIS amount. Omit when the record has exactly one field of type 'currency'. The exponent is looked up from one shared ISO 4217 table — BHD/KWD/OMR/TND are 3-decimal and JPY is 0-decimal, so a hardcoded ×100 is a bug.", "type": "string" },
+        "signed": { "description": "For type 'money': whether the amount may be negative. Minor units are int64 SIGNED on the wire and in the column regardless; this records whether a negative value is meaningful for the domain.", "type": "boolean" },
+        "nonNegative": { "description": "For type 'money': emits a CHECK (col >= 0).", "type": "boolean" },
+        "maxDenominator": { "description": "For type 'ratio': the largest permitted denominator, so cross-multiplication of two ratios stays inside int64. REQUIRED on every ratio; merge_fragments.py supplies 1000000 where a fragment omitted it and flags that with maxDenominatorDefaulted.", "type": "integer", "minimum": 1 },
+        "maxDenominatorDefaulted": { "description": "true when the bound was supplied by the merge, not by the designing agent. Visible rather than implicit.", "const": true },
+        "min": { "type": "integer" },
+        "max": { "type": "integer" },
+        "maxLength": { "type": "integer", "minimum": 1 },
+        "items": { "description": "For type 'array': the element type as a word, a single element schema, or a list of field definitions for an array-of-objects. The list form generates an inline OpenAPI object schema and a JSONB column.", "type": ["string", "object", "array"] },
+        "itemsRef": { "type": "string" },
+        "unitField": { "type": "string" },
+        "format": { "description": "Documented identifier format, e.g. 'MRB-<8 hex>'. Documentation only — the generator does not emit a regex from it.", "type": "string" },
+        "constraint": { "type": "string" },
+        "unit": { "type": "string" },
+        "derived": { "description": "true when the value is computed from other fields; the generated column is still stored, and the arithmetic identity is asserted by a rule.", "type": ["boolean", "string"] },
+        "immutableAfter": { "type": "string" },
+        "note": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "enum" } }, "required": ["type"] },
+          "then": { "required": ["values"],
+                    "description": "An enum with no values generates a free-form string column — exactly the silent-scaffold failure this schema exists to stop." }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ref" } }, "required": ["type"] },
+          "then": { "required": ["refDomain"],
+                    "description": "A ref with no refDomain is an undeclared cross-service dependency." }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ratio" } }, "required": ["type"] },
+          "then": { "required": ["maxDenominator"],
+                    "description": "A ratio with no bound on its denominator cannot be compared by cross-multiplication without risking int64 overflow. ProfitSharingRatio is an EXACT ratio: numerator/denominator int64, never a float." }
+        }
+      ]
+    },
+
+    "fieldType": {
+      "description": "The closed type vocabulary. Mapping (OpenAPI / Postgres / Java):\n  id        string / VARCHAR(64) PRIMARY KEY / String\n  ref       string / VARCHAR(64), no FK / String\n  string    string / TEXT / String\n  enum      string+enum / TEXT + CHECK IN / String\n  bool      boolean / BOOLEAN / Boolean\n  int32     integer int32 / INTEGER / Integer\n  int64     integer int64 / BIGINT / Long\n  money     integer int64 / BIGINT (signed MINOR units) / Long\n  ratio     object {numerator,denominator} int64 / two BIGINT columns / Ratio\n  currency  string ^[A-Z]{3}$ / CHAR(3) / String\n  countryCode string ^[A-Z]{2}$ / CHAR(2) / String\n  date      string date / DATE / LocalDate\n  timestamp string date-time / TIMESTAMP WITH TIME ZONE / OffsetDateTime\n  period    object {from,to} dates / two DATE columns / Period\n  array     array / JSONB / List\nThere is deliberately no 'decimal', no 'float' and no 'number'.",
+      "enum": ["id", "ref", "string", "enum", "bool", "int32", "int64",
+               "money", "ratio", "currency", "countryCode", "date",
+               "timestamp", "period", "array"]
+    },
+
+    "rule": {
+      "description": "One Shariah or arithmetic invariant. generator/rules_lang.py translates `assert` into a SQL CHECK and/or a Java predicate when every identifier in it resolves to a control-record field and it uses only the restricted grammar; otherwise the rule is emitted as UNIMPLEMENTED in the generated registry and listed in docs/RULES-GAPS.md. An unimplemented rule is a reported gap — it is never silently dropped and never silently claimed.",
+      "type": "object",
+      "required": ["id", "assert", "onViolation"],
+      "properties": {
+        "id": { "description": "Stable rule id, e.g. ISB-MUDS-02. Unique within the domain; used as the generated test and method name.", "type": "string", "pattern": "^[A-Z0-9][A-Z0-9-]*$" },
+        "assert": { "description": "The invariant, as an expression. Restricted grammar (translated to SQL + Java): field names, string/int/bool literals, ( ), ! && || -> , comparisons == != < <= > >= , arithmetic + - * , `x in [a,b]`, and present(f)/absent(f)/isSet(f)/exists(f). Anything else — count(), sum(), forall(), bq.*, `where`, immutable(), appendOnly() — is OUT of the translated subset by design and is reported, not approximated.", "type": "string", "minLength": 1 },
+        "onViolation": { "description": "reject = the write fails. flag = the write succeeds and a Shariah-non-compliance finding is appended to the audit trail (DESIGN.md §5.8).", "enum": ["reject", "flag", "reject-or-flag", "warn"] },
+        "enforcedAt": { "description": "Where the rule is meant to bite. 'db-check' also emits the Java predicate, because a service that trusts the database alone cannot report WHICH rule failed.", "enum": ["db-check", "service", "generator-lint", "repository", "api", "manual"] },
+        "errorCode": { "description": "The stable code the API returns and the audit record carries.", "type": "string" },
+        "citation": { "description": "AAOIFI / IFSB / BNM references supporting the rule, by body and number. NO clause here was read from a primary standard text: the citations come from this estate's research record, and generated code marks them clauseVerified:false. A rule with no citation is an arithmetic identity or an engineering invariant, not a Shariah claim.", "type": "array", "items": { "type": "string" } },
+        "note": { "type": "string" },
+        "severity": { "type": "string" },
+        "appliesTo": { "description": "The action terms the rule is checked on (initiate, update, control, …). Default: all writes.", "type": "array", "items": { "type": "string" } },
+        "scope": { "type": "string" },
+        "emits": {},
+        "dependsOn": {},
+        "test": { "description": "The designing agent's prose test vector. Prose, so the generator cannot execute it; it is copied into the generated test as a javadoc comment so a human can.", "type": "string" },
+        "testVectors": {},
+        "examples": {},
+        "citationStatus": { "type": "string" }
+      }
+    },
+
+    "event": {
+      "description": "One AsyncAPI channel in the generated api/events.yaml. payload[] must name control-record or behaviour-qualifier fields; a payload naming a field that does not exist is a contract that cannot be filled, and validation rejects it.",
+      "type": "object",
+      "required": ["name", "topic", "payload"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "topic": { "description": "Kafka topic. Must start with the business-area namespace in dotted form, e.g. isb.deposits.…", "type": "string" },
+        "payload": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "trigger": { "type": "string" },
+        "keyField": { "type": "string" },
+        "consumers": {},
+        "note": { "type": "string" }
+      }
+    },
+
+    "shariah": {
+      "description": "The Shariah surface of the domain. `reviewed` is const false: there is no catalog value and no generator flag that can set it true. Only a named Shariah supervisory board can, and that is a change to this schema, not to a data file.",
+      "type": "object",
+      "required": ["contractType", "capitalAtRisk", "reviewed"],
+      "properties": {
+        "contractType": {
+          "description": "DESIGN.md §7's enum, plus the values the design agents had to raise because §7's list does not cover them (Takaful, Retakaful, Tabarru, Ujrah, Musharakah, Mudarabah-Wakala hybrids, 'None' for governance domains). Those are RAISED CONTRADICTIONS, not silent extensions — see the generated docs/SHARIAH-GAPS.md.",
+          "type": ["string", "array", "null"]
+        },
+        "capitalAtRisk": {
+          "description": "true ⇒ the balance is NOT a liability of the bank and a CBPII funds confirmation against it must REFUSE, not answer FundsAvailable:true (DESIGN.md §7, behavioural rule). Generates the fundsConfirmationSupported CHECK.",
+          "type": ["boolean", "string", "null"]
+        },
+        "reviewed": { "const": false },
+        "review": { "type": "string" },
+        "reviewStatus": { "type": "string" },
+        "reviewNote": { "type": "string" },
+        "standards": {
+          "description": "Cited by body and number only. clauseVerified is false for every one of them. Two fragment dialects are accepted: a prose string, or a structured citation {body, code, clause?, title?, note?} — the governance and financing agents wrote the structured form and it is the better one.",
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "object", "required": ["code"],
+                "properties": {
+                  "body": { "description": "AAOIFI | IFSB | BNM | REGULATOR | ISO | … Optional because one fragment folded the body into `code`; the merge lifts it out when the code's leading token names a known body and leaves it absent rather than guessing.", "type": "string" },
+                  "code": { "description": "Standard number, e.g. 'SS 13' or 'IFSB-30'.", "type": "string" },
+                  "clause": { "description": "Clause reference AS RECORDED BY THE RESEARCH, not as read from the primary text.", "type": "string" },
+                  "title": { "type": "string" },
+                  "note": { "type": "string" },
+                  "ref": { "description": "Alias for `code` as two fragments wrote it; merge_fragments.py renames it.", "type": "string" },
+                  "appliesTo": { "type": "string" },
+                  "clauseVerified": { "description": "Set to false by the merge for every structured citation, without exception.", "const": false },
+                  "status": { "type": "string" }
+                } }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

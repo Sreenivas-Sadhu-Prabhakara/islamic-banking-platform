@@ -1,0 +1,24 @@
+# Test profile. The main application.yaml deliberately has NO in-memory
+# fallback — a missing DATABASE_URL must fail startup, never silently downgrade
+# production to a fake store (DESIGN.md section 5.4) — so the test DSN is here,
+# explicit, and nowhere near the runtime config.
+#
+# The Flyway migration under src/main/resources/db/migration runs against H2 in
+# PostgreSQL mode, which is what proves the generated DDL is executable without
+# a Postgres server. Nothing in the generated DDL is Postgres-only.
+spring:
+  datasource:
+    url: "jdbc:h2:mem:__ARTIFACT_ID__;MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Never fetched: the deny-tests inject an authentication directly and
+          # the decoder is created lazily.
+          jwk-set-uri: "http://localhost:0/jwks"

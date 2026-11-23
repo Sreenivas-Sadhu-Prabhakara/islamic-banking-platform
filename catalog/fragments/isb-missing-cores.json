@@ -1,0 +1,1002 @@
+{
+  "fragmentOf": "catalog/islamic-service-landscape.json",
+  "schemaVersion": "2.0.0-draft",
+  "designContract": "openbanking-platform/DESIGN.md §8 (catalog entry shape), §7 (three Islamic surface rules + the behavioural funds-confirmation rule), §5-§6 (invariants, money boundary), D5 ('plus the missing account/transaction/balance domains invented')",
+  "businessArea": "Islamic Account Servicing and Positions",
+  "namespace": "isb-accounts",
+  "phase": "P4 — design only. The generator was NOT run; no repo under islamic-banking-services was touched.",
+  "status": "DESIGN DRAFT — every shariah block is reviewed:false. Nothing here is a compliance claim.",
+  "serviceDomainCount": 5,
+  "slice": "THE MISSING CORES. These five service domains do not exist in the 48. Verified: grep -riE 'account|transaction|posting|balance|statement|position' over catalog/islamic-service-landscape.json returns product-contract domains only (Mudarabah Savings Account, Wakala Investment Account, …) and zero servicing domains. An Open Banking AIS surface over this estate today has no account to read, no transaction to list, no balance to return and no statement to fetch.",
+
+  "placement": {
+    "decision": "A NEW business area, 'Islamic Account Servicing and Positions', namespace 'isb-accounts', with two business domains: 'Islamic Account Servicing' (Account, Posting, Balance, Statement) and 'Islamic Position Keeping' (Position).",
+    "whyNotInsideDepositsAndInvestmentAccounts": [
+      "These five must serve the WHOLE estate, not the deposit products: the Open Banking AIS surface has to list a Murabaha financing account and a Sukuk holding alongside a Mudarabah savings account. Placing the ledger inside 'Deposits and Investment Accounts' would make all twelve Islamic Financing domains and all three Sukuk domains depend on a deposits namespace to post a single entry.",
+      "In generate.py the business area IS the Kubernetes namespace (AREA_NAMESPACE, generator/generate.py:69-76). Business area is therefore a deployment and blast-radius boundary here, not only a taxonomy label. The servicing ledger is the one component every other area calls; it earns its own namespace for the same reason openbank-pkg earns its own module.",
+      "Separation of concerns that the 48 already imply: a product domain owns the CONTRACT (its terms, its ratio, its underlying asset). The servicing core owns the SERVABLE RECORD (identity, postings, balances, statements). Collapsing them means 17 product repos each grow their own ledger — the exact duplication the generator exists to prevent."
+    ],
+    "whyNotInsideTakafulAndSharedOperations": "That area is already the estate's catch-all (Customer Reference Data, AAOIFI Financial Accounting, IFSB Regulatory Reporting, channels). Adding the account ledger to it buries the single most-called component of the estate in a bucket named for insurance.",
+    "bianAnalogue": "BIAN separates per-product fulfilment service domains from position-keeping / operations service domains, which is the same split made here. I did NOT verify BIAN v12's exact business-area or service-domain names against a primary source in this session — see uncertain[] on each domain. The split is justified above on estate-internal grounds that do not depend on BIAN naming.",
+    "costOfThe49thDomain": "One catalog entry, as DESIGN.md §8 requires — PROVIDED it lands in an existing business area. A NEW business area additionally costs one line in generate.py's AREA_NAMESPACE dict, because that dict is keyed by area name and would otherwise raise KeyError. That one line is the whole price of this fragment's placement decision, and it is declared in landscapePatch below."
+  },
+
+  "landscapePatch": {
+    "note": "APPLIED in this branch (feat/p4-real-domains), because a fragment whose domains are absent from the landscape can never be generated, and because check_fragment.py validates a fragment against the landscape. Three edits, ~9 lines, no repo under islamic-banking-services touched, generator NOT run.",
+    "edits": [
+      {
+        "file": "catalog/islamic-service-landscape.json",
+        "change": "append one businessArea object: 'Islamic Account Servicing and Positions' with the two business domains and five serviceDomains exactly as they appear in this fragment (name / functionalPattern / assetType only — the landscape keeps its three-field shape until the §8 schema upgrade merges the fragments in)."
+      },
+      {
+        "file": "catalog/islamic-service-landscape.json",
+        "change": "add 'Transact' and 'Track' to the top-level functionalPatterns array. Both are already known to generate.py's PATTERN_NOUN map (generate.py:57,59); only the landscape's declared list lacked them. No code change."
+      },
+      {
+        "file": "generator/generate.py",
+        "change": "add one AREA_NAMESPACE entry: \"Islamic Account Servicing and Positions\": \"isb-accounts\". Without it generate.py raises KeyError on the new area. This is the ONLY generator edit this slice needs."
+      }
+    ],
+    "notDone": "The §8 template upgrade (real JSON-schema'd openapi.yaml, Flyway migration, real repository, rules component, AsyncAPI) is a different slice. These five entries are written to that upgraded template's data shape, not to the current scaffold template."
+  },
+
+  "conventions": {
+    "fieldTypes": {
+      "id": "TEXT PRIMARY KEY — the control record identifier",
+      "ref": "TEXT — reference to a record owned by another service domain; no FK across service boundaries (decentralised data). Carries refDomain.",
+      "string": "TEXT",
+      "enum": "TEXT + CHECK (col IN (values))",
+      "bool": "BOOLEAN NOT NULL",
+      "int32": "INTEGER",
+      "int64": "BIGINT",
+      "money": "BIGINT — SIGNED int64 MINOR units. Requires currencyField. NEVER a float, NEVER a decimal column, NEVER scaled by a hardcoded 100: the ISO 4217 exponent table is the only authority (BHD/KWD/OMR/TND/JOD = 3, JPY = 0). DESIGN.md §5.1, §6.",
+      "ratio": "two columns <name>_num BIGINT NOT NULL, <name>_den BIGINT NOT NULL CHECK (<name>_den > 0) — an EXACT ratio. OpenAPI: {numerator: int64, denominator: int64}. NEVER a float, NEVER a percentage float, NEVER a decimal string. DESIGN.md §7.",
+      "currency": "CHAR(3) — ISO 4217 alphabetic code",
+      "date": "DATE",
+      "timestamp": "TIMESTAMPTZ"
+    },
+    "assertGrammar": {
+      "note": "Identical to the grammar declared by the sibling area fragments (isb-operations.json), so ONE template compiles every area. Anything that could not be written in it was NOT turned into a rule — it is in the domain's uncertain[] instead.",
+      "expr": "term (('&&' | '||') term)*",
+      "term": [
+        "<path> <op> <value>",
+        "present(<path>)",
+        "absent(<path>)",
+        "sum(<bqPath>.<field>) <op> <value>",
+        "count(<bqPath>) <op> <value>",
+        "immutable(<path>)",
+        "appendOnly(<entity>)",
+        "unique(<path>[, <path>...])",
+        "onTransition(<fromState> -> <toState>): <expr>",
+        "<expr> -> <expr>   (implication; the template compiles it as !lhs || rhs)"
+      ],
+      "op": ["==", "!=", "<", "<=", ">", ">=", "in", "notIn"],
+      "path": "<field> | <bqPath>.<field> | ref(<serviceDomain>).<field>",
+      "value": "<literal> | <path> | [<literal>, ...]",
+      "moneyComparison": "both sides must be type money AND share the same currency field; the template emits the currency-equality guard automatically."
+    },
+    "onViolation": {
+      "reject": "HTTP 4xx with {code, message}; the generator emits a failing-then-passing deny test per rule from `code`.",
+      "flag": "record accepted, a finding is written to the append-only Shariah audit ledger (DESIGN.md §5.8) and routed to the Shariah compliance function. Used where the rule needs a human or a jurisdiction policy, never to soften a hard invariant."
+    },
+    "eventTopics": "isb.<group>.<subject>, mirroring bian.<group>.<subject>.",
+    "auditLedger": "Every rule with onViolation 'flag', and every Shariah-non-compliance finding, appends to the per-service append-only audit table. DELETE is never the correction — a reversal row is (DESIGN.md §5.8).",
+    "shariahReviewState": "Every `shariah` block in this fragment is reviewed:false. No field here is a compliance claim; each is a modelling proposal awaiting a named SSB. DESIGN.md §7.",
+    "standardsProvenance": "standards[] lists ONLY standards this estate's research actually verified (~/openbanking-bian-isb-research-2026-11-10/DECISIONS.md WAVE 3, agent-investigations-shariah.md). `clauseText: false` means number/title/date were verified but no clause text was extracted — nothing clause-level may rest on it. Anything remembered rather than verified is in uncertain[], not here.",
+    "noDuplicationOfComplianceFields": "A Shariah-bearing value has exactly ONE owning service domain. The servicing cores carry REFERENCES to it, never copies — because two copies of a profit-sharing ratio is two compliance claims that can disagree, and the code cannot say which one is true. The single deliberate exception is Islamic Statement's profit-disclosure BQ, which snapshots the ratio that applied, immutably, at issue time: that snapshot IS the disclosure obligation, not a second source of truth (ISB-IST-12 enforces that it equalled the owner's value at issue)."
+  },
+
+  "obieMapping": {
+    "provenance": "Field names, enums, patterns and lengths below were read from the pinned spec on disk: openbanking-platform/standards/read-write-api-specs/dist/openapi/account-info-openapi.json, info.version 4.0.1, clone tag v4.0.1-Update-1 (DESIGN.md §1.1). Nothing here is transcribed from the HTML documentation or from memory.",
+    "rule1": "DESIGN.md §7 RULE 1 — do not extend OBIE's own schemas. /open-banking/v4.0/{aisp|pisp|cbpii} stays byte-conformant; httpx/json.go already does DisallowUnknownFields. An extra field on an OBIE schema is a conformance failure.",
+    "startingPoint": "DECISIONS.md WAVE 3 shariah_gap already partitions this ('REPRESENTABLE UNCHANGED … NOT REPRESENTABLE …'). The table below starts from that partition and only adds (a) the exact v4.0.1 field paths, (b) three schema-level hazards the research did not name, and (c) the per-field verdicts for the five new records.",
+
+    "representableUnchanged": [
+      {"ourField": "Islamic Account.accountId", "obiePath": "OBAccount6.AccountId", "note": "AccountId is minLength 1 maxLength 40. Our format IACC-<32 hex> is 37 chars and fits; 'IACC-<uuid-with-dashes>' would be 41 and would NOT fit. Enforced by ISB-IAC-11."},
+      {"ourField": "Islamic Account.status", "obiePath": "OBAccount6.Status (OBInternalAccountStatus1Code: Deleted|Disabled|Enabled|Pending|ProForma)", "note": "Our five enum values are the same five, upper-snake. 1:1, no loss."},
+      {"ourField": "Islamic Account.statusUpdatedAt", "obiePath": "OBAccount6.StatusUpdateDateTime"},
+      {"ourField": "Islamic Account.currency", "obiePath": "OBAccount6.Currency (ActiveOrHistoricCurrencyCode, ^[A-Z]{3,3}$)"},
+      {"ourField": "Islamic Account.nickname", "obiePath": "OBAccount6.Nickname", "note": "A HUMAN label only. Putting the contract type here as the machine-readable product class is forbidden — see extensionPointsDeliberatelyNotUsed."},
+      {"ourField": "Islamic Account.openingDate / maturityDate", "obiePath": "OBAccount6.OpeningDate / OBAccount6.MaturityDate", "note": "MaturityDate is a real win for a Mudarabah TERM investment account: the tenor is representable unchanged."},
+      {"ourField": "Islamic Account.obieAccountCategory", "obiePath": "OBAccount6.AccountCategory (OBInternalAccountType1Code: Business|Personal)"},
+      {"ourField": "Islamic Account BQ identifications[]", "obiePath": "OBAccount6.Account[] {SchemeName, Identification, Name, SecondaryIdentification}", "note": "Cardinality matches (OBIE Account is an array), which is why this is a 1..n behaviour qualifier and not flat fields."},
+      {"ourField": "Islamic Account BQ servicing-arrangement", "obiePath": "OBAccount6.Servicer {SchemeName, Identification}"},
+      {"ourField": "Islamic Account BQ statement-preference", "obiePath": "OBAccount6.StatementFrequencyAndFormat[] {Frequency, CommunicationMethod, Format, DeliveryAddress}"},
+      {"ourField": "Islamic Posting.postingId", "obiePath": "OBTransaction6.TransactionId"},
+      {"ourField": "Islamic Posting.amountMinor (magnitude) + currency", "obiePath": "OBTransaction6.Amount {Amount, Currency}", "note": "MAGNITUDE only. See conformanceHazards/unsignedAmount — the sign cannot travel in Amount."},
+      {"ourField": "Islamic Posting.creditDebitIndicator", "obiePath": "OBTransaction6.CreditDebitIndicator", "note": "This is where the sign of our signed int64 goes. Not a nicety: it is the only conformant carrier of direction."},
+      {"ourField": "Islamic Posting.bookingAt / valueDate", "obiePath": "OBTransaction6.BookingDateTime / ValueDateTime"},
+      {"ourField": "Islamic Posting.status", "obiePath": "OBTransaction6.Status (ExternalEntryStatus1Code: BOOK|FUTR|INFO|PDNG|RJCT)", "note": "Our BOOKED|PENDING|REJECTED map to BOOK|PDNG|RJCT. REVERSED does NOT map — a reversal is a second BOOK posting with reversalOfPostingRef, which is both conformant and the correct append-only behaviour (DESIGN.md §5.8)."},
+      {"ourField": "Islamic Posting.transactionInformation", "obiePath": "OBTransaction6.TransactionInformation", "note": "Unstructured. Human-readable only."},
+      {"ourField": "Islamic Posting.obieProprietaryCode / obieProprietaryCodeIssuer", "obiePath": "OBTransaction6.ProprietaryBankTransactionCode {Code(≤35), Issuer(≤35)}", "note": "THE useful finding of this table: ProprietaryBankTransactionCode is a DEFINED OBIE field, so publishing postingKind through it extends nothing. additionalProperties:false on that object, Code ≤ 35 chars — every postingKind value in this fragment is shorter. Issuer is namespaced 'ISB' so a TPP can tell it is not a UK.OBIE code. This carries the kind of the movement; it does NOT carry a profit-sharing ratio, a reserve, or who bears capital loss."},
+      {"ourField": "Islamic Posting.counterpartyAccountRef / counterpartyName", "obiePath": "OBTransaction6.CreditorAccount / DebtorAccount {SchemeName, Identification, Name}"},
+      {"ourField": "Islamic Posting.chargeAmountMinor", "obiePath": "OBTransaction6.ChargeAmount", "note": "Carries an ujrah/admin fee charged on the movement. Does NOT distinguish ta'widh from gharamah — that distinction is on the sibling."},
+      {"ourField": "Islamic Balance.amountMinor + currency + creditDebitIndicator", "obiePath": "OBReadBalance1.Data.Balance[] {Amount{Amount,Currency,SubType}, CreditDebitIndicator}"},
+      {"ourField": "Islamic Balance.balanceType", "obiePath": "OBReadBalance1…Type (OBBalanceType1Code: CLAV|CLBD|FWAV|INFO|ITAV|ITBD|OPAV|OPBD|PRCD|XPCD)", "note": "Our seven values were CHOSEN to be exactly 1:1 onto OPBD|CLBD|CLAV|ITBD|ITAV|FWAV|INFO. No Islamic balance type was invented, because an invented code would fail conformance."},
+      {"ourField": "Islamic Balance.asOf", "obiePath": "OBReadBalance1…DateTime"},
+      {"ourField": "Islamic Balance BQ credit-line[]", "obiePath": "OBReadBalance1…CreditLine[] {Included, Type(Available|Credit|Emergency|Pre-Agreed|Temporary), Amount}", "note": "Our limitType enum is those five values. The Islamic instrument behind the line (QARD_HASSAN|TAWARRUQ) and its chargeBasis are NOT representable and live on the sibling."},
+      {"ourField": "Islamic Statement.statementId / statementReference", "obiePath": "OBStatement2.StatementId / StatementReference"},
+      {"ourField": "Islamic Statement.type", "obiePath": "OBStatement2.Type (OBInternalStatementType1Code: AccountClosure|AccountOpening|Annual|Interim|RegularPeriodic)", "note": "Our five values are those five. The 'annual profit disclosure' statement is type ANNUAL — no new code needed."},
+      {"ourField": "Islamic Statement.periodFrom / periodTo / createdAt", "obiePath": "OBStatement2.StartDateTime / EndDateTime / CreationDateTime"},
+      {"ourField": "Islamic Statement.openingBalanceMinor / closingBalanceMinor", "obiePath": "OBStatement2.StatementAmount[] with Type UK.OBIE.StartingBalance / UK.OBIE.ClosingBalance", "note": "Published OBIE codes, so conformant. See conformanceHazards/fscsInsurance for the one StatementAmount code that must NEVER be used on a capital-at-risk account."},
+      {"ourField": "Islamic Statement BQ statement-line[]", "obiePath": "GET /accounts/{AccountId}/statements/{StatementId}/transactions → OBTransaction6[]", "note": "Statement lines are served as transactions, mapped exactly as Islamic Posting is."}
+    ],
+
+    "notRepresentable_mustLiveOnSibling": [
+      {"ourField": "Islamic Account.contractType", "siblingPath": "GET /islamic-banking/v1/aisp/accounts/{AccountId}/islamic-account-info → ContractType", "why": "OBAccount6.AccountTypeCode is OBExternalAccountSubType1Code (CACC|SVGS|LOAN|MORT|…26 ISO 20022 values). None of them means Mudarabah, Wakala, Wadiah, Qard Hassan, Murabaha, Ijara, IMB, Istisna, Salam or Sukuk. Any choice is lossy; SVGS for a Mudarabah savings account tells a TPP it is a conventional savings account."},
+      {"ourField": "profitSharingRatio (owned by the product domain, NOT copied onto the account)", "siblingPath": "islamic-account-info → ProfitSharingRatio {InvestorShare, MudaribShare} as an EXACT int ratio, fetched by the sibling from ref(productDomain)", "why": "OBIE has no profit construct at all. The only rate-shaped field in AIS is OBStatement2.StatementInterest.Rate — forbidden (see extensionPointsDeliberatelyNotUsed) and typed `number`, i.e. a float."},
+      {"ourField": "Islamic Account.capitalGuaranteed / capitalLossBorneBy", "siblingPath": "islamic-account-info → CapitalGuaranteed, CapitalLossBorneBy", "why": "The single most important field with no OBIE counterpart. OBIE's whole balance model presumes the balance is a liability of the ASPSP. For a Mudarabah IAH it is not: the holder bears capital loss. There is no field, flag or code in AIS v4.0.1 that can say so."},
+      {"ourField": "Islamic Account.balanceBasis (DEPOSIT|UNITISED_INVESTMENT|FINANCING_RECEIVABLE)", "siblingPath": "islamic-account-info → BalanceBasis", "why": "A unitised investment holding is not a cash balance. OBIE has one notion of balance."},
+      {"ourField": "Islamic Account.fundsConfirmationEligible", "siblingPath": "islamic-account-info → FundsConfirmationEligible (and a CBPII refusal, DESIGN.md §7)", "why": "CBPII has no 'cannot answer' concept — only FundsAvailable true/false. The refusal is behaviour, not a field."},
+      {"ourField": "Islamic Account.ssbApprovalReference / fatwaRef", "siblingPath": "GET /islamic-banking/v1/aisp/accounts/{AccountId}/shariah-compliance → SSBApprovalReference, FatwaId", "why": "No governance-provenance field exists anywhere in OBIE."},
+      {"ourField": "Islamic Posting.postingKind (the Islamic semantics of the movement)", "siblingPath": "islamic-account-info/postings projection + obieProprietaryCode on the OBIE side", "why": "PARTIAL: the KIND rides conformantly in ProprietaryBankTransactionCode (above). What does not fit is the consequence of the kind — that PROFIT_DECLARED is not yet payable, that GHARAMAH_PENALTY_TO_CHARITY never becomes bank income, that CAPITAL_LOSS_ALLOCATION reduces the holder's own capital."},
+      {"ourField": "Islamic Posting.shariahScreeningOutcome + BQ shariah-screening", "siblingPath": "shariah-compliance → ScreeningOutcome, CriteriaSetRef, ScreenerType", "why": "No Shariah construct in OBIE, AND no conformant error code: OBError1.ErrorCode is minLength 4 maxLength 4 drawn from OBExternalStatusReason1Code, which contains no permissibility value (DECISIONS.md WAVE 1). A BLOCK outcome cannot be expressed in a conformant UK error body — an open owner decision, see areaWideGaps."},
+      {"ourField": "Islamic Balance.guaranteedAmountMinor / atRiskAmountMinor", "siblingPath": "islamic-account-info → GuaranteedAmount, AtRiskAmount", "why": "OBIE's CLAV ('closing available') is a promise. For a capital-at-risk account the honest answer is two numbers, and OBIE has room for one."},
+      {"ourField": "Islamic Balance.includesUnrealisedProfit / declaredProfitIncludedMinor / accruedProfitIncludedMinor", "siblingPath": "GET /islamic-banking/v1/aisp/accounts/{AccountId}/profit-distributions → Status Declared|Accrued|Paid", "why": "The declared/accrued/paid distinction is the heart of IAH accounting and has no OBIE representation. Undeclared profit in a CLAV balance is a false statement about withdrawable money."},
+      {"ourField": "Islamic Balance.smoothingApplied, PER/IRR amounts", "siblingPath": "profit-distributions → SmoothingApplied {PERAmount, IRRAmount}", "why": "No smoothing construct in OBIE. Also a jurisdictional fork (AAOIFI SS 46 §6/6 and IFSB GN-3 permit; BNM PD 028-63 ¶13.5 prohibits), so it is configuration, never a default."},
+      {"ourField": "Islamic Balance BQ balance-component[]", "siblingPath": "islamic-account-info → BalanceComponents[]", "why": "The decomposition (principal / declared profit / accrued profit / hibah / PER share / IRR share / capital loss) is what makes a single balance number honest. OBIE carries the total only."},
+      {"ourField": "Islamic Statement.declaredProfitMinor, paidProfitMinor, accruedProfitMinor, hibahMinor, agencyFeeChargedMinor, perAppliedMinor, irrAppliedMinor, purificationAmountMinor, tawidhChargedMinor, gharamahDonatedMinor", "siblingPath": "profit-distributions (profit, smoothing) + shariah-compliance (purification, late-payment policy)", "why": "OBStatement2 has StatementFee / StatementInterest / StatementBenefit / StatementValue / StatementAmount with published UK.OBIE.* code sets. There is no profit code, no purification code, no ta'widh code, no zakat code. UK.OBIE.LatePayment exists as a FEE type and must not be reused for gharamah, because a gharamah is not a fee the bank keeps."},
+      {"ourField": "Islamic Statement BQ profit-disclosure.appliedProfitSharingRatio", "siblingPath": "profit-distributions → AppliedProfitSharingRatio (exact int ratio)", "why": "Same as the account ratio, plus: the disclosure obligation is a point-in-time snapshot and OBIE has nowhere to put a ratio that is not an interest rate."},
+      {"ourField": "Islamic Position — the ENTIRE domain", "siblingPath": "islamic-account-info → Positions[] (or its own sibling sub-resource)", "why": "AIS v4.0.1 has no holdings, units, NAV or encumbrance concept at all. unitCount, unitScaleExponent, valuationBasis, screening status, purification and rahn encumbrance have no OBIE counterpart of any kind. A unitised Mudarabah term holding is simply not an AIS resource."}
+    ],
+
+    "extensionPointsDeliberatelyNotUsed": [
+      {"point": "OBTransaction6.SupplementaryData — type object, additionalProperties: true", "verdict": "EXISTS and is schema-conformant. NOT USED.", "why": "Three reasons. (1) It is untyped, so no TPP can rely on it and no codegen compiles against it — DESIGN.md §5.7 requires drift to be a compile error. (2) It is not permission-gated: §7 RULE 2 requires ReadProfitDistributionBasic/Detail to gate profit data, and a blob inside a ReadTransactionsDetail response bypasses that gate entirely. (3) A profit-sharing claim smuggled into an untyped blob is precisely the 'compliance claim the code cannot back' that §7 forbids. Note also that OBAccount6 has NO SupplementaryData, so the account resource has no such hatch even if we wanted one."},
+      {"point": "OBTransaction6.ExtendedProprietaryBankTransactionCodes[] {Code, Issuer, Description}", "verdict": "EXISTS. NOT USED for Shariah semantics.", "why": "Same permission-gating objection. The single ProprietaryBankTransactionCode (one kind per posting) is sufficient and keeps one posting = one kind."},
+      {"point": "OBAccount6.Description / Nickname", "verdict": "Human label only.", "why": "WAVE 3: 'the machine-readable product class lives on the sibling, not smuggled into Description'. A TPP parsing 'Mudarabah' out of a free-text nickname is a bug waiting to happen."},
+      {"point": "OBStatement2.StatementInterest {Type, Rate, RateType, Frequency, Amount}", "verdict": "FORBIDDEN.", "why": "Non-conformant in intent and religiously wrong: profit from a Mudarabah is not interest. Additionally OBRate1_1 is declared `type: number` (example 0.05) — a float — so even mechanically it cannot carry an exact ratio under DESIGN.md §5.1."},
+      {"point": "x-namespaced-enum fields (StatementFeeType, StatementAmountType, StatementRateType, …) — declared `type: string` in the OpenAPI with the code set only in x-namespaced-enum", "verdict": "SCHEMA-VALID BUT NOT CONFORMANT. NOT USED.", "why": "A value like UK.ISB.UjrahAgencyFee would pass JSON-schema validation and the conformance suite's schema checks, because the constraint is documentation, not an enum. It is still not a published OBIE code. This is the trap worth naming explicitly: on these fields, 'validates' and 'conformant' are different questions, and we answer the stricter one."}
+    ],
+
+    "conformanceHazards": [
+      {"id": "unsignedAmount", "finding": "OBActiveCurrencyAndAmount_SimpleType pattern is ^\\d{1,13}$|^\\d{1,13}\\.\\d{1,5}$ — no sign is permitted. Our postings and balances are SIGNED int64 minor units.", "consequence": "The boundary MUST split a signed int64 into (magnitude, CreditDebitIndicator). Serialising -1250 as \"-12.50\" is a schema violation; serialising it as \"12.50\" with the wrong indicator is a money error that validates. This is the conversion's most likely silent failure.", "mitigation": "ISB-IPO-03 and ISB-IBA-11 fix the sign/indicator agreement in the CATALOG, so the generated rule tests catch a disagreement before the Go boundary ever sees it."},
+      {"id": "thirteenDigitCeiling", "finding": "The same pattern caps the integer part at 13 digits.", "consequence": "int64 minor units reach 9.22e18. In a 0-exponent currency (JPY) any balance above 9,999,999,999,999 minor units is unrepresentable in OBIE; in a 3-exponent currency (BHD/KWD/OMR/TND/JOD) the ceiling is 10^16 minor units. The conversion must FAIL LOUDLY, never truncate or round."},
+      {"id": "accountIdLength", "finding": "AccountId is maxLength 40.", "consequence": "'IACC-' + a dashed UUID is 41 characters and would be rejected. Our format is 'IACC-' + 32 hex = 37. Enforced by ISB-IAC-11."},
+      {"id": "fscsInsurance", "finding": "OBInternalStatementAmountType1Code includes UK.OBIE.FSCSInsurance.", "consequence": "A deposit-guarantee amount on a capital-at-risk Mudarabah investment account is a false statement of the same class as the CBPII FundsAvailable:true that §7 forbids. ISB-IST-13 rejects it."},
+      {"id": "accountTypeCodeLossy", "finding": "OBExternalAccountSubType1Code has no Islamic value.", "consequence": "Every Islamic account published on the OBIE surface carries an approximate product code. ISB-IAC-12 makes that approximation an explicit, audited, SSB-visible mapping decision (onViolation: flag) instead of a silent default."}
+    ],
+
+    "siblingSurface": {
+      "server": "openbank-islamic (DESIGN.md §7 RULE 3) — a 6th Go resource server, its own versioned OpenAPI document, its own README stating it is an extension beyond the UK standard, not part of it.",
+      "endpoints": [
+        {"path": "GET /islamic-banking/v1/aisp/accounts/{AccountId}/islamic-account-info", "fedBy": ["Islamic Account", "Islamic Balance", "Islamic Position"], "permissions": ["ReadIslamicAccountBasic", "ReadIslamicAccountDetail"]},
+        {"path": "GET /islamic-banking/v1/aisp/accounts/{AccountId}/profit-distributions", "fedBy": ["Islamic Statement", "Islamic Posting (postingKind PROFIT_*)", "Profit Calculation And Distribution", "Profit Equalization Reserve", "Investment Risk Reserve"], "permissions": ["ReadProfitDistributionBasic", "ReadProfitDistributionDetail"]},
+        {"path": "GET /islamic-banking/v1/aisp/accounts/{AccountId}/shariah-compliance", "fedBy": ["Islamic Account (ssbApprovalReference, fatwaRef)", "Islamic Posting (shariah-screening BQ)", "Islamic Position (screening-outcome BQ)", "Shariah Supervisory Board Directory", "Fatwa And Ruling Repository", "Income Purification"], "permissions": ["ReadShariahComplianceBasic", "ReadShariahComplianceDetail"]}
+      ],
+      "consent": "RULE 2 — the same consent, the same token, the same permission allowlist, the same consent_accounts scope check. The sibling calls openbank-pkg/consent's three predicates; it never implements its own.",
+      "linkage": "The conformant surface may point at the sibling only through the OBIE Links/Meta envelope. No Islamic field crosses into an OBIE schema."
+    }
+  },
+
+  "moneyBoundary": {
+    "theTwoRepresentations": {
+      "java": "These five control records, and the Java isb-* cores generally: SIGNED int64 MINOR units + an explicit ISO 4217 currency field alongside every amount. Never a float, never a decimal column.",
+      "go": "openbank-pkg/obie.Amount — decimal STRING + ISO currency, over shopspring/decimal."
+    },
+    "theExactConversionPoint": "ONE function pair in openbank-pkg/obie (DESIGN.md §6: 'One conversion function … No other code may convert'), called from exactly one place per direction: openbank-islamic's adapter to the Java isb-* cores (the read path that builds islamic-account-info, profit-distributions and shariah-compliance), and the same adapter's write path if a posting is ever initiated through the OB layer. The Java side never emits a decimal string, and the Go side never does arithmetic on minor units. The handler layer must receive obie.Amount already converted — the conversion must not be reachable from a handler, a template, or a second adapter.",
+    "whatCanGoWrong": [
+      "HARDCODED ×100. Every Gulf currency this estate is actually for has exponent 3 — BHD, KWD, OMR, TND, and JOD. A ×100 conversion silently divides a Bahraini dinar balance by ten. JPY (exponent 0) multiplies it by a hundred. The ISO 4217 exponent table is the only authority, and BHD must be the FIRST property-test case, not an afterthought.",
+      "SIGN LOSS. OBIE's amount pattern is unsigned (see conformanceHazards/unsignedAmount). A signed int64 must become (magnitude, CreditDebitIndicator). A wrong indicator produces a response that validates, passes the conformance suite, and is wrong by twice the amount.",
+      "TRAILING-ZERO STRIPPING. decimal.String() renders 10.00 as '10' (named in DECISIONS.md WAVE 3 as an existing defect). Converting back gives 1000 minor units in a 2-exponent currency and 10000 in a 3-exponent one if the exponent is re-derived from the string's visible decimals instead of from the currency. NEVER infer the exponent from the string.",
+      "13-DIGIT OVERFLOW. OBIE caps the integer part at 13 digits; int64 minor units go far higher. The conversion must return an error, not a truncated or rounded amount.",
+      "DOUBLE CONVERSION. minor → decimal → minor across the sibling and the OBIE surface must be exactly round-trip (property test, both directions, every exponent). Any intermediate rounding is a money leak repeated per request.",
+      "A BARE int64 CROSSING THE BOUNDARY. Which is why every money field in this fragment is required to declare currencyField, and why rules ISB-IPO-10, ISB-IBA-01 and ISB-IPS-10 reject a posting, balance or position whose currency disagrees with its account. An amount without its currency is not a number, it is a guess.",
+      "A RATIO ENTERING THE MONEY PATH. profitSharingRatio and nonCompliantIncomeRatio are int numerator/denominator pairs and must never be converted by, or routed through, the money functions. A ratio rendered as a decimal string and re-parsed is how an exact 7/10 becomes 0.7000000000000001."
+    ],
+    "whatThisFragmentDoesAboutIt": "Nothing at the Go layer — that is openbank-islamic's slice. What it does do is make the catalog side non-negotiable: type 'money' is defined as signed int64 minor units with a mandatory currencyField and a *Minor name suffix (check_fragment.py asserts all three), type 'ratio' is two int columns, and no float appears anywhere in this file (asserted by the same checker)."
+  },
+
+  "businessDomains": [
+    {
+      "name": "Islamic Account Servicing",
+      "serviceDomains": [
+        {
+          "name": "Islamic Account",
+          "functionalPattern": "Administer",
+          "assetType": "Islamic Account",
+          "controlRecord": {
+            "name": "Islamic Account Administrative Plan",
+            "table": "islamic_account",
+            "identifiers": [
+              {"name": "accountId", "type": "id", "format": "IACC-<32hex>", "primary": true, "note": "37 chars; OBIE AccountId is maxLength 40, and a dashed UUID would be 41."},
+              {"name": "productDomainRef", "type": "ref", "refDomain": "one of the 48 product service domains", "note": "WHICH of the 48 owns the contract behind this account — e.g. 'Mudarabah Savings Account'. The servicing core never owns contract terms."},
+              {"name": "productContractRef", "type": "ref", "refDomain": "the domain named by productDomainRef", "note": "the control-record id inside that product domain (e.g. the Mudarabah Savings Facility id)"},
+              {"name": "customerPartyRef", "type": "ref", "refDomain": "Customer Reference Data"},
+              {"name": "ssbApprovalReference", "type": "ref", "refDomain": "Shariah Supervisory Board Directory"},
+              {"name": "fatwaRef", "type": "ref", "refDomain": "Fatwa And Ruling Repository"}
+            ],
+            "money": [],
+            "fields": [
+              {"name": "accountId", "type": "id", "required": true},
+              {"name": "productDomainRef", "type": "ref", "required": true, "refDomain": "one of the 48 product service domains"},
+              {"name": "productContractRef", "type": "ref", "required": true, "refDomain": "the domain named by productDomainRef"},
+              {"name": "customerPartyRef", "type": "ref", "required": true, "refDomain": "Customer Reference Data"},
+              {"name": "contractType", "type": "enum", "required": true, "values": ["MUDARABAH", "WAKALA", "WADIAH", "QARD_HASSAN", "MURABAHA", "IJARA", "IJARA_MUNTAHIA_BITTAMLEEK", "ISTISNA", "SALAM", "SUKUK"], "note": "Exactly DESIGN.md §7's ten ContractType values, upper-snake. Not extended — see uncertain[] for the four §7 cannot name."},
+              {"name": "currency", "type": "currency", "required": true},
+              {"name": "nickname", "type": "string", "required": false, "note": "human label only; never the machine-readable product class"},
+              {"name": "status", "type": "enum", "required": true, "values": ["PENDING", "ENABLED", "DISABLED", "PRO_FORMA", "DELETED"], "note": "1:1 with OBInternalAccountStatus1Code"},
+              {"name": "statusUpdatedAt", "type": "timestamp", "required": true},
+              {"name": "openingDate", "type": "date", "required": true},
+              {"name": "maturityDate", "type": "date", "required": false, "note": "the tenor of a Mudarabah TERM investment account; representable unchanged as OBAccount6.MaturityDate"},
+              {"name": "obieAccountCategory", "type": "enum", "required": true, "values": ["PERSONAL", "BUSINESS"], "note": "OBInternalAccountType1Code"},
+              {"name": "obieAccountTypeCode", "type": "string", "required": true, "note": "the ISO 20022 subtype this account is PUBLISHED as on the OBIE surface. A value from OBExternalAccountSubType1Code in the pinned spec; deliberately typed string, not enum, so the 26 values are read from standards/read-write-api-specs and never drift in a copy here. ALWAYS lossy for an Islamic product — ISB-IAC-12 audits the choice."},
+              {"name": "capitalGuaranteed", "type": "bool", "required": true, "note": "Is the principal a liability of the bank? false for MUDARABAH/WAKALA/SUKUK. Drives the CBPII refusal (DESIGN.md §7). Immutable."},
+              {"name": "capitalLossBorneBy", "type": "enum", "required": true, "values": ["ACCOUNT_HOLDER", "BANK", "NOT_APPLICABLE"], "note": "NOT_APPLICABLE only where the bank is the financier, not the custodian of the holder's capital (the financing contract types). The single field with no OBIE counterpart that makes a Mudarabah account truthful."},
+              {"name": "balanceBasis", "type": "enum", "required": true, "values": ["DEPOSIT", "UNITISED_INVESTMENT", "FINANCING_RECEIVABLE"]},
+              {"name": "fundsConfirmationEligible", "type": "bool", "required": true, "note": "false whenever capitalGuaranteed is false. openbank-funds must REFUSE, not answer false — a refusal and a 'no' are different statements."},
+              {"name": "profitDistributionPolicyRef", "type": "ref", "required": false, "refDomain": "Profit Calculation And Distribution", "note": "a REFERENCE. The ratio, the basis and the smoothing policy are owned there and by the product domain, never copied here."},
+              {"name": "zakatTreatmentRef", "type": "ref", "required": false, "refDomain": "Zakat Calculation"},
+              {"name": "ssbApprovalReference", "type": "ref", "required": true, "refDomain": "Shariah Supervisory Board Directory", "note": "an id, not a claim: which approval the product carried when this account was opened. Immutable."},
+              {"name": "fatwaRef", "type": "ref", "required": false, "refDomain": "Fatwa And Ruling Repository"},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "updatedAt", "type": "timestamp", "required": true}
+            ]
+          },
+          "behaviourQualifiers": [
+            {
+              "name": "Account Identification",
+              "path": "identifications",
+              "cardinality": "1..n",
+              "fields": [
+                {"name": "schemeName", "type": "string", "required": true, "note": "value from OBInternalAccountIdentification4Code in the pinned spec; string, not a copied enum, to avoid drift"},
+                {"name": "identification", "type": "string", "required": true},
+                {"name": "name", "type": "string", "required": false},
+                {"name": "secondaryIdentification", "type": "string", "required": false}
+              ],
+              "note": "1..n because OBAccount6.Account is an array. Representable unchanged."
+            },
+            {
+              "name": "Servicing Arrangement",
+              "path": "servicing-arrangement",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "servicerSchemeName", "type": "string", "required": true},
+                {"name": "servicerIdentification", "type": "string", "required": true},
+                {"name": "branchRef", "type": "ref", "required": false, "refDomain": "Branch And Digital Channel Operation"}
+              ]
+            },
+            {
+              "name": "Account Party Role",
+              "path": "party-roles",
+              "cardinality": "1..n",
+              "fields": [
+                {"name": "partyRef", "type": "ref", "required": true, "refDomain": "Customer Reference Data"},
+                {"name": "role", "type": "enum", "required": true, "values": ["ACCOUNT_HOLDER", "JOINT_HOLDER", "RABB_UL_MAL", "MUDARIB", "MUWAKKIL", "WAKIL", "LESSEE", "BENEFICIARY", "AUTHORISED_SIGNATORY"], "note": "The Islamic roles are the point: a Mudarabah account has a capital provider (rabb-ul-mal) and a manager (mudarib), and the bank is the mudarib. OBIE's /party has no vocabulary for this."},
+                {"name": "fromDate", "type": "date", "required": true},
+                {"name": "toDate", "type": "date", "required": false}
+              ]
+            },
+            {
+              "name": "Capital Risk Disclosure",
+              "path": "capital-risk-disclosure",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "disclosureVersionRef", "type": "ref", "required": true, "refDomain": "Shariah Compliance Review"},
+                {"name": "disclosedAt", "type": "timestamp", "required": true},
+                {"name": "acknowledgedByCustomerAt", "type": "timestamp", "required": true},
+                {"name": "channelRef", "type": "ref", "required": false, "refDomain": "Branch And Digital Channel Operation"},
+                {"name": "disclosedProfitSharingRatioRef", "type": "ref", "required": false, "refDomain": "the domain named by productDomainRef", "note": "a REFERENCE to the ratio disclosed, not a copy of it"}
+              ],
+              "note": "0..1 at the schema level because a capital-GUARANTEED account has nothing to disclose; ISB-IAC-04 makes it mandatory before a capital-at-risk account may be ENABLED."
+            },
+            {
+              "name": "Statement Preference",
+              "path": "statement-preference",
+              "cardinality": "0..n",
+              "fields": [
+                {"name": "frequency", "type": "string", "required": true, "note": "OBFrequency2 in the pinned spec"},
+                {"name": "communicationMethod", "type": "string", "required": false},
+                {"name": "format", "type": "string", "required": false}
+              ],
+              "note": "maps to OBAccount6.StatementFrequencyAndFormat[]"
+            }
+          ],
+          "rules": [
+            {"id": "ISB-IAC-01", "assert": "contractType in [MUDARABAH, WAKALA, SUKUK] -> capitalGuaranteed == false && capitalLossBorneBy == ACCOUNT_HOLDER && fundsConfirmationEligible == false", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_CAPITAL_GUARANTEE_CLAIMED", "cite": ["AAOIFI SS 13 (Revised) Mudarabah — the capital provider bears loss of capital; the manager's entitlement is a share of PROFIT", "AAOIFI SS 46 Al-Wakalah Bi Al-Istithmar", "AAOIFI SS 45 Protection of Capital and Investments (protection is distinct from guarantee)", "BNM PD 028-63 ¶24.5 (no principal/profit-guaranteed representation)", "DESIGN.md §7 (capital-at-risk flag; funds confirmation must refuse)"]},
+            {"id": "ISB-IAC-02", "assert": "contractType in [WADIAH, QARD_HASSAN] -> capitalGuaranteed == true && capitalLossBorneBy == BANK && balanceBasis == DEPOSIT", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_DEPOSIT_NOT_GUARANTEED", "cite": ["Qard is repayable at par on demand and Wadiah yad dhamanah is a guaranteed safekeeping — UNVERIFIED at clause level in this estate's research; industry practice.", "AAOIFI SS 45 (cited for the guarantee/protection distinction, not for this mapping)"]},
+            {"id": "ISB-IAC-03", "assert": "contractType in [MURABAHA, IJARA, IJARA_MUNTAHIA_BITTAMLEEK, ISTISNA, SALAM] -> balanceBasis == FINANCING_RECEIVABLE && capitalLossBorneBy == NOT_APPLICABLE && fundsConfirmationEligible == false", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_FINANCING_BASIS_WRONG", "cite": ["A financing account is the bank's receivable, not the customer's capital: there is no customer capital to be at risk and no balance to confirm funds against."]},
+            {"id": "ISB-IAC-04", "assert": "onTransition(PENDING -> ENABLED): capitalGuaranteed == false -> present(capital-risk-disclosure.acknowledgedByCustomerAt) && capital-risk-disclosure.acknowledgedByCustomerAt >= capital-risk-disclosure.disclosedAt", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_RISK_NOT_DISCLOSED", "cite": ["IFSB-30 (Dec 2023) Principle 18 ¶276 (the sharing ratio must be declared in advance; material change requires disclosure)", "AAOIFI SS 38 §5/4/1 (an acceptance-confirmation step is required)", "BNM PD 028-63 ¶24.5"]},
+            {"id": "ISB-IAC-05", "assert": "immutable(accountId) && immutable(contractType) && immutable(capitalGuaranteed) && immutable(balanceBasis) && immutable(productDomainRef) && immutable(ssbApprovalReference)", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_CONTRACT_TERM_MUTATED", "cite": ["IFSB-30 (Dec 2023) Principle 18 ¶276 (material change is disclosed, not silently edited)", "DESIGN.md §5.8 (append-only audit for every Shariah-bearing change)"]},
+            {"id": "ISB-IAC-06", "assert": "absent(profitSharingRatio) && absent(expectedProfitRate) && absent(agencyFeeRatio)", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_CARRIES_COMPLIANCE_FIELD", "cite": ["conventions.noDuplicationOfComplianceFields — two copies of a profit-sharing ratio is two compliance claims that can disagree, and the code cannot say which is true. DESIGN.md §7 ('a profit-sharing field modelled by a developer is a compliance claim the code cannot back').", "A schema-level assertion: the generator must FAIL the build if such a field is ever added to this control record."]},
+            {"id": "ISB-IAC-07", "assert": "present(ssbApprovalReference) && present(productDomainRef) && present(productContractRef)", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_NO_PRODUCT_PROVENANCE", "cite": ["No servable account without a named product contract and a named SSB approval behind it. IFSB-30 (Dec 2023) Principle 4."]},
+            {"id": "ISB-IAC-08", "assert": "contractType == MUDARABAH -> count(party-roles) >= 2", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_MUDARABAH_ROLES_INCOMPLETE", "cite": ["AAOIFI SS 13 (Revised) — a Mudarabah has two parties: rabb-ul-mal and mudarib. The grammar cannot express 'one role of each kind'; the template emits the role-pair check from this rule's note."], "note": "count(party-roles) >= 2 is the grammar-expressible approximation. The generated test additionally asserts one RABB_UL_MAL and one MUDARIB — that assertion is hand-written ONCE in the template, not per domain."},
+            {"id": "ISB-IAC-09", "assert": "unique(identifications.schemeName, identifications.identification)", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_IDENTIFIER_COLLISION", "cite": ["OBIE Account[] entries must each resolve to exactly one account."]},
+            {"id": "ISB-IAC-10", "assert": "present(maturityDate) -> maturityDate > openingDate", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_TENOR_INVALID", "cite": ["Interval integrity."]},
+            {"id": "ISB-IAC-11", "assert": "accountId <= 40", "onViolation": "reject", "code": "ISLAMIC_ACCOUNT_ID_TOO_LONG_FOR_OBIE", "cite": ["OBIE v4.0.1 AccountId: minLength 1, maxLength 40 (standards/read-write-api-specs/dist/openapi/account-info-openapi.json, schema AccountId). An id longer than 40 is unservable on the conformant surface."], "note": "length comparison; the template compiles `<string field> <op> <int>` as a length constraint."},
+            {"id": "ISB-IAC-12", "assert": "present(obieAccountTypeCode)", "onViolation": "flag", "code": "ISLAMIC_ACCOUNT_OBIE_SUBTYPE_IS_APPROXIMATE", "cite": ["OBExternalAccountSubType1Code has no Islamic value (26 ISO 20022 values, none of which means Mudarabah). Every Islamic account published on the OBIE surface therefore carries an approximate product code.", "DESIGN.md §7 RULE 1 (the OBIE schema may not be extended, so the approximation cannot be fixed on that surface)"], "note": "Deliberately a 'flag', not a 'reject': the record is valid and servable. The flag makes the lossy mapping an audited, SSB-visible decision per account instead of a silent default. This is the honest handling of a gap we cannot close."}
+          ],
+          "events": [
+            {"name": "islamic-account.opened", "topic": "isb.account.lifecycle", "payload": ["accountId", "productDomainRef", "contractType", "currency", "capitalGuaranteed", "balanceBasis", "customerPartyRef", "openingDate"]},
+            {"name": "islamic-account.status-changed", "topic": "isb.account.lifecycle", "payload": ["accountId", "status", "statusUpdatedAt"]},
+            {"name": "islamic-account.capital-risk-disclosed", "topic": "isb.account.disclosure", "payload": ["accountId", "contractType", "disclosureVersionRef", "disclosedAt", "acknowledgedByCustomerAt"]},
+            {"name": "islamic-account.obie-subtype-approximated", "topic": "isb.account.conformance", "payload": ["accountId", "contractType", "obieAccountTypeCode"]}
+          ],
+          "shariah": {
+            "contractType": "PerRecord",
+            "capitalAtRisk": true,
+            "reviewed": false,
+            "reviewNote": "UNREVIEWED — requires named Shariah board sign-off",
+            "contractTypeNote": "This domain is contract-type-AGNOSTIC: it serves all ten §7 types, and the record's own contractType field is authoritative per account. capitalAtRisk is set true here because the domain MUST be able to represent the capital-at-risk case correctly; the per-record truth is capitalGuaranteed.",
+            "standards": [
+              {"ref": "AAOIFI SS 13 (Revised)", "title": "Mudarabah", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 46", "title": "Al-Wakalah Bi Al-Istithmar (Investment Agency)", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 45", "title": "Protection of Capital and Investments", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 38", "title": "Online Financial Dealings — §5/4/1, §6", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "IFSB-30 (Dec 2023)", "title": "Revised Guiding Principles on Corporate Governance for IIFS — Principles 4, 18 ¶276", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "BNM PD 028-63", "title": "Investment Account policy document — ¶24.5 (no principal/profit-guaranteed representation)", "clauseText": true, "source": "research/agent-investigations-shariah.md", "note": "Jurisdictional. Configuration, never a default."}
+            ]
+          },
+          "uncertain": [
+            "The Wadiah/Qard guarantee mapping (ISB-IAC-02) rests on industry practice, not on a clause this estate's research verified. Wadiah yad amanah (pure trust, NOT guaranteed) and Wadiah yad dhamanah (guaranteed safekeeping) are different contracts and §7's single 'Wadiah' value cannot distinguish them. I did not add a value to §7's enum; a reviewer must decide whether Wadiah needs splitting or whether a sub-type field belongs on the Wadiah Safekeeping Account product domain.",
+            "capitalLossBorneBy = NOT_APPLICABLE for the financing types is my modelling call. An alternative reading is that the field should be absent rather than NOT_APPLICABLE on a financing account. I chose a required field with an explicit third value because a NULL on a capital-risk field is indistinguishable from a bug.",
+            "Whether the OBIE AccountTypeCode approximation (ISB-IAC-12) should be chosen per contract type by the platform or per account by the bank is an owner decision. I modelled it as a stored, audited per-account value so that neither answer is foreclosed, but I did NOT write the contractType -> ISO 20022 subtype mapping table: publishing one would be asserting that SVGS is an acceptable public description of a Mudarabah savings account, and that is a disclosure judgement, not an engineering one.",
+            "BIAN v12's exact service-domain name for this concept (the estate's placement argument does not depend on it) was not verified against a primary source in this session.",
+            "I did not model account closure/settlement mechanics (final profit attribution on a term account closed before maturity, and whether early withdrawal forfeits declared-but-unpaid profit). That is a product-domain computation and a live scholarly question, not a servicing-record field."
+          ],
+          "openBankingMapping": {
+            "obieSurface": "GET /open-banking/v4.0/aisp/accounts and /accounts/{AccountId} → OBReadAccount6/OBAccount6",
+            "fields": [
+              {"field": "accountId", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.AccountId"},
+              {"field": "status", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.Status"},
+              {"field": "statusUpdatedAt", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.StatusUpdateDateTime"},
+              {"field": "currency", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.Currency"},
+              {"field": "nickname", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.Nickname", "note": "human label only"},
+              {"field": "openingDate", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.OpeningDate"},
+              {"field": "maturityDate", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.MaturityDate"},
+              {"field": "obieAccountCategory", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.AccountCategory"},
+              {"field": "identifications[]", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.Account[]"},
+              {"field": "servicing-arrangement", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.Servicer"},
+              {"field": "statement-preference[]", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBAccount6.StatementFrequencyAndFormat[]"},
+              {"field": "obieAccountTypeCode", "verdict": "REPRESENTABLE_WITH_LOSS", "obie": "OBAccount6.AccountTypeCode", "note": "the value is conformant; the MEANING is approximate. ISB-IAC-12 audits it."},
+              {"field": "contractType", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.ContractType"},
+              {"field": "capitalGuaranteed", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.CapitalGuaranteed"},
+              {"field": "capitalLossBorneBy", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.CapitalLossBorneBy"},
+              {"field": "balanceBasis", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.BalanceBasis"},
+              {"field": "fundsConfirmationEligible", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.FundsConfirmationEligible + a CBPII refusal"},
+              {"field": "party-roles[].role (RABB_UL_MAL/MUDARIB/WAKIL)", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.PartyRoles[]", "note": "OBIE /party carries parties, not Islamic contractual roles."},
+              {"field": "capital-risk-disclosure", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "shariah-compliance.Disclosure"},
+              {"field": "ssbApprovalReference / fatwaRef", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "shariah-compliance.SSBApprovalReference / FatwaId"},
+              {"field": "profitDistributionPolicyRef / zakatTreatmentRef", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "profit-distributions / shariah-compliance.ZakatTreatment"}
+            ]
+          }
+        },
+        {
+          "name": "Islamic Posting",
+          "functionalPattern": "Transact",
+          "assetType": "Islamic Posting",
+          "controlRecord": {
+            "name": "Islamic Posting Transaction",
+            "table": "islamic_posting",
+            "identifiers": [
+              {"name": "postingId", "type": "id", "format": "IPST-<32hex>", "primary": true},
+              {"name": "journalId", "type": "string", "note": "groups the legs of one double entry; not unique per row"},
+              {"name": "accountRef", "type": "ref", "refDomain": "Islamic Account"},
+              {"name": "sourceDomainRef", "type": "ref", "refDomain": "one of the 48 product/governance service domains"},
+              {"name": "sourcePostingRef", "type": "string", "note": "the originating domain's own id for this movement — the idempotency key at the ledger boundary (ISB-IPO-09)"}
+            ],
+            "money": [
+              {"name": "amountMinor", "currencyField": "currency", "signed": true, "meaning": "the movement on THIS account. Negative is a debit. The sign is the ledger's; OBIE's unsigned pattern forces it into CreditDebitIndicator at the boundary."},
+              {"name": "chargeAmountMinor", "currencyField": "currency", "signed": false, "meaning": "fee charged on this movement (ujrah/admin). Separate from amountMinor so a fee is never silently netted into the principal movement."}
+            ],
+            "fields": [
+              {"name": "postingId", "type": "id", "required": true},
+              {"name": "journalId", "type": "string", "required": true},
+              {"name": "accountRef", "type": "ref", "required": true, "refDomain": "Islamic Account"},
+              {"name": "postingKind", "type": "enum", "required": true, "values": ["DEPOSIT_IN", "WITHDRAWAL_OUT", "TRANSFER_IN", "TRANSFER_OUT", "UNIT_SUBSCRIPTION", "UNIT_REDEMPTION", "PROFIT_ACCRUED", "PROFIT_DECLARED", "PROFIT_PAID", "HIBAH", "PER_TRANSFER", "IRR_TRANSFER", "CAPITAL_LOSS_ALLOCATION", "MURABAHA_COST_PORTION", "MURABAHA_PROFIT_PORTION", "IJARA_RENTAL", "IJARA_ADVANCE_RENTAL", "AGENCY_FEE_UJRAH", "ADMIN_FEE", "TAWIDH_ACTUAL_LOSS", "GHARAMAH_PENALTY_TO_CHARITY", "PURIFICATION_DEBIT", "ZAKAT_DEBIT", "FX_SETTLEMENT", "REVERSAL"], "note": "WHY the money moved, in Islamic terms. This is the field OBIE has no vocabulary for — and the one thing about it that IS conformant is that its value rides in ProprietaryBankTransactionCode (≤35 chars; every value here is shorter)."},
+              {"name": "currency", "type": "currency", "required": true},
+              {"name": "amountMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "chargeAmountMinor", "type": "money", "required": false, "currencyField": "currency"},
+              {"name": "creditDebitIndicator", "type": "enum", "required": true, "values": ["CREDIT", "DEBIT"], "note": "Redundant with the sign of amountMinor BY DESIGN, and reconciled by ISB-IPO-03: OBIE's amount pattern is unsigned, so this is the only conformant carrier of direction. Storing it means the boundary never has to infer it."},
+              {"name": "bookingAt", "type": "timestamp", "required": true},
+              {"name": "valueDate", "type": "date", "required": true},
+              {"name": "status", "type": "enum", "required": true, "values": ["BOOKED", "PENDING", "REJECTED", "REVERSED"]},
+              {"name": "reversalOfPostingRef", "type": "ref", "required": false, "refDomain": "Islamic Posting", "note": "a correction is a NEW row pointing at the old one. DELETE is never the correction (DESIGN.md §5.8)."},
+              {"name": "sourceDomainRef", "type": "ref", "required": true, "refDomain": "one of the 48 product/governance service domains"},
+              {"name": "sourcePostingRef", "type": "string", "required": true},
+              {"name": "shariahScreeningOutcome", "type": "enum", "required": true, "values": ["PASS", "REFER", "BLOCK", "NOT_SCREENED"], "note": "NOT_SCREENED is a first-class value, not a NULL, because that is the TRUE state of most postings: transaction-level screening is regulation in one jurisdiction for one product (Bangladesh Bank IBRPD Circular 01), and elsewhere it is issuer practice (DESIGN.md §7)."},
+              {"name": "purificationRequired", "type": "bool", "required": true},
+              {"name": "purificationCaseRef", "type": "ref", "required": false, "refDomain": "Income Purification", "note": "a reference. The purification AMOUNT is computed and owned by Income Purification, not copied here."},
+              {"name": "tawidhComputationRef", "type": "ref", "required": false, "refDomain": "Late Payment Charity Handling"},
+              {"name": "counterpartyAccountRef", "type": "ref", "required": false, "refDomain": "Islamic Account"},
+              {"name": "counterpartyName", "type": "string", "required": false},
+              {"name": "transactionInformation", "type": "string", "required": false},
+              {"name": "obieProprietaryCode", "type": "string", "required": true, "note": "the value published in OBTransaction6.ProprietaryBankTransactionCode.Code (maxLength 35). Derived from postingKind, stored so the published code is auditable and stable."},
+              {"name": "obieProprietaryCodeIssuer", "type": "string", "required": true, "const": "ISB", "note": "namespaced so a TPP can see it is not a UK.OBIE code"},
+              {"name": "createdAt", "type": "timestamp", "required": true}
+            ]
+          },
+          "behaviourQualifiers": [
+            {
+              "name": "Contra Leg",
+              "path": "contra-legs",
+              "cardinality": "1..n",
+              "fields": [
+                {"name": "contraLedgerAccount", "type": "enum", "required": true, "values": ["CUSTOMER_ACCOUNT", "MUDARABAH_POOL", "SHAREHOLDERS_FUND", "PROFIT_EQUALIZATION_RESERVE", "INVESTMENT_RISK_RESERVE", "CHARITY_POOL", "ZAKAT_PAYABLE", "SUSPENSE", "FEE_INCOME", "ASSET_CLEARING"], "note": "CHARITY_POOL and SHAREHOLDERS_FUND being distinguishable is what makes ISB-IPO-06 possible: a gharamah may never land in bank income."},
+                {"name": "contraAccountRef", "type": "ref", "required": false, "refDomain": "Islamic Account"},
+                {"name": "contraAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+                {"name": "contraCreditDebitIndicator", "type": "enum", "required": true, "values": ["CREDIT", "DEBIT"]}
+              ]
+            },
+            {
+              "name": "Profit Attribution",
+              "path": "profit-attribution",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "distributionRunRef", "type": "ref", "required": true, "refDomain": "Profit Calculation And Distribution"},
+                {"name": "periodFrom", "type": "date", "required": true},
+                {"name": "periodTo", "type": "date", "required": true},
+                {"name": "distributionBasis", "type": "enum", "required": true, "values": ["DAILY_AVERAGE", "MONTHLY_MINIMUM", "WEIGHTED_AVERAGE"]},
+                {"name": "smoothingApplied", "type": "bool", "required": true},
+                {"name": "perAppliedMinor", "type": "money", "required": false, "currencyField": "currency", "meaning": "PER applied to THIS posting. The reserve BALANCE is owned by Profit Equalization Reserve."},
+                {"name": "irrAppliedMinor", "type": "money", "required": false, "currencyField": "currency", "meaning": "IRR applied to THIS posting. The reserve BALANCE is owned by Investment Risk Reserve."}
+              ]
+            },
+            {
+              "name": "Shariah Screening",
+              "path": "shariah-screening",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "screenedAt", "type": "timestamp", "required": true},
+                {"name": "criteriaSetRef", "type": "ref", "required": true, "refDomain": "KYC And Shariah Screening", "note": "a VERSIONED, SSB-approved criteria set. No threshold constant appears in this fragment."},
+                {"name": "outcome", "type": "enum", "required": true, "values": ["PASS", "REFER", "BLOCK"]},
+                {"name": "reasonCode", "type": "string", "required": false},
+                {"name": "screenerType", "type": "enum", "required": true, "values": ["AUTOMATED", "MANUAL", "HYBRID"]},
+                {"name": "mccUsed", "type": "bool", "required": true, "note": "was ISO 18245 MerchantCategoryCode available and used?"},
+                {"name": "purposeCodeUsed", "type": "bool", "required": true, "note": "was the ISO 20022 Purpose code available and used?"}
+              ],
+              "note": "mccUsed/purposeCodeUsed exist because DECISIONS.md WAVE 1 records that UK OBL carries only a CONDITIONAL 4-char Purpose plus a conditional MerchantCategoryCode, and the research calls both unreliable. Recording WHICH weak input produced an outcome is the difference between an auditable gate and a guess."
+            },
+            {
+              "name": "Reversal",
+              "path": "reversal",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "reversedAt", "type": "timestamp", "required": true},
+                {"name": "reversingPostingRef", "type": "ref", "required": true, "refDomain": "Islamic Posting"},
+                {"name": "reversalReason", "type": "enum", "required": true, "values": ["OPERATIONAL_ERROR", "SHARIAH_NON_COMPLIANCE", "CUSTOMER_DISPUTE", "DUPLICATE", "UPSTREAM_REVERSAL"]},
+                {"name": "actorRef", "type": "ref", "required": true, "refDomain": "Customer Reference Data"}
+              ]
+            }
+          ],
+          "rules": [
+            {"id": "ISB-IPO-01", "assert": "sum(contra-legs.contraAmountMinor) + amountMinor == 0", "onViolation": "reject", "code": "POSTING_JOURNAL_UNBALANCED", "cite": ["Double-entry identity. Every minor unit that leaves one ledger account arrives in another."]},
+            {"id": "ISB-IPO-02", "assert": "appendOnly(islamic_posting) && immutable(amountMinor) && immutable(postingKind) && immutable(accountRef) && immutable(currency)", "onViolation": "reject", "code": "POSTING_MUTATED", "cite": ["DESIGN.md §5.8 (append-only audit; DELETE destroying a record is a correctness bug). A correction is a REVERSAL row, never an edit."]},
+            {"id": "ISB-IPO-03", "assert": "creditDebitIndicator == DEBIT -> amountMinor < 0 && creditDebitIndicator == CREDIT -> amountMinor > 0", "onViolation": "reject", "code": "POSTING_SIGN_INDICATOR_DISAGREE", "cite": ["OBIE OBActiveCurrencyAndAmount_SimpleType pattern ^\\d{1,13}$|^\\d{1,13}\\.\\d{1,5}$ permits NO sign, so direction must travel in CreditDebitIndicator (account-info-openapi.json). A disagreement here produces a response that validates and is wrong by twice the amount.", "DESIGN.md §6 (the money boundary is the highest-risk code in the estate)"]},
+            {"id": "ISB-IPO-04", "assert": "postingKind in [PROFIT_DECLARED, PROFIT_PAID] -> present(profit-attribution.distributionRunRef)", "onViolation": "reject", "code": "POSTING_PROFIT_WITHOUT_DISTRIBUTION_RUN", "cite": ["No profit may be declared or paid except out of a completed distribution run: profit is a SHARE of a realised result, not a rate applied to a balance.", "AAOIFI SS 13 (Revised) §8/1 (a Mudarabah share is a ratio of PROFIT, not of the balance)"]},
+            {"id": "ISB-IPO-05", "assert": "postingKind in [PROFIT_ACCRUED, PROFIT_DECLARED, PROFIT_PAID] -> ref(Islamic Account).contractType in [MUDARABAH, WAKALA, SUKUK]", "onViolation": "reject", "code": "POSTING_PROFIT_ON_NON_PROFIT_SHARING_ACCOUNT", "cite": ["A Qard or Wadiah account cannot earn profit — a benefit on it is a discretionary gift (hibah) and must not be labelled or accounted as profit.", "AAOIFI SS 13 (Revised)", "AAOIFI SS 46"]},
+            {"id": "ISB-IPO-06", "assert": "postingKind == GHARAMAH_PENALTY_TO_CHARITY -> contra-legs.contraLedgerAccount == CHARITY_POOL", "onViolation": "reject", "code": "POSTING_PENALTY_TO_BANK_INCOME", "cite": ["A gharamah (penalty for delay) may not become income of the bank; it is donated. The estate already has 'Late Payment Charity Handling' and 'Sadaqah And Charity Management' for exactly this. UNVERIFIED at clause level in this estate's research — the ta'widh/gharamah distinction is reported in the research but no clause text was extracted."]},
+            {"id": "ISB-IPO-07", "assert": "postingKind == TAWIDH_ACTUAL_LOSS -> present(tawidhComputationRef)", "onViolation": "flag", "code": "POSTING_TAWIDH_WITHOUT_LOSS_COMPUTATION", "cite": ["Ta'widh is compensation for ACTUAL loss and so presupposes a computation of that loss; a ta'widh set as a percentage of the overdue amount is a penalty wearing a compensation label. Flag, not reject, because the computation may legitimately arrive after the posting. UNVERIFIED at clause level."]},
+            {"id": "ISB-IPO-08", "assert": "shariahScreeningOutcome == BLOCK -> status == REJECTED && present(shariah-screening.outcome)", "onViolation": "reject", "code": "POSTING_BLOCKED_BUT_BOOKED", "cite": ["Bangladesh Bank IBRPD Circular 01 (the ONLY jurisdiction/product where transaction-level screening is regulation, per DESIGN.md §7)", "DESIGN.md §5.8 (every Shariah-non-compliance finding is audited)"]},
+            {"id": "ISB-IPO-09", "assert": "unique(sourceDomainRef, sourcePostingRef)", "onViolation": "reject", "code": "POSTING_DUPLICATE_FROM_SOURCE", "cite": ["Idempotency at the ledger boundary. A retried upstream call must not post twice. Mirrors DESIGN.md §4's scoped idempotency key (UNIQUE (client_id, idempotency_key)) — scoped to the source, never globally unique."]},
+            {"id": "ISB-IPO-10", "assert": "currency == ref(Islamic Account).currency", "onViolation": "reject", "code": "POSTING_CURRENCY_MISMATCH", "cite": ["DESIGN.md §5.1 / §6 — currency-checked arithmetic. An amount without its own currency agreeing with the account's is a guess, and the minor-unit exponent depends on it (BHD 3, JPY 0)."]},
+            {"id": "ISB-IPO-11", "assert": "obieProprietaryCodeIssuer == ISB && obieProprietaryCode <= 35", "onViolation": "reject", "code": "POSTING_PROPRIETARY_CODE_NOT_CONFORMANT", "cite": ["OBIE ProprietaryBankTransactionCodeStructure1: Code maxLength 35, Issuer maxLength 35, additionalProperties: false (account-info-openapi.json). An unnamespaced code would be indistinguishable from a UK.OBIE code."]},
+            {"id": "ISB-IPO-12", "assert": "status == REVERSED -> present(reversal.reversingPostingRef) && present(reversalOfPostingRef) -> postingKind == REVERSAL", "onViolation": "reject", "code": "POSTING_REVERSAL_INCOMPLETE", "cite": ["A reversal is a linked pair of rows. One-sided reversal state is how a ledger loses an audit trail."]},
+            {"id": "ISB-IPO-13", "assert": "shariahScreeningOutcome == NOT_SCREENED", "onViolation": "flag", "code": "POSTING_NOT_SHARIAH_SCREENED", "cite": ["DESIGN.md §7 ('Transaction-level Shariah screening is regulation in exactly ONE jurisdiction for one product; everywhere else it is issuer practice. The code says so.')", "DECISIONS.md WAVE 1 (the gate has no reliable input: Purpose is conditional and customer-supplied, MCC is a coarse proxy)"], "note": "A flag on the NORMAL case, deliberately. It makes the estate's honest state — most postings are unscreened — visible in the audit ledger instead of implied by a silent default. Whether an unscreenable payment should fail open, fail closed or REFER is an OPEN OWNER DECISION (areaWideGaps); this rule does not pre-empt it."}
+          ],
+          "events": [
+            {"name": "islamic-posting.booked", "topic": "isb.posting.ledger", "payload": ["postingId", "journalId", "accountRef", "postingKind", "amountMinor", "currency", "creditDebitIndicator", "bookingAt", "valueDate", "status"]},
+            {"name": "islamic-posting.reversed", "topic": "isb.posting.ledger", "payload": ["postingId", "reversalOfPostingRef", "reversalReason", "reversedAt", "status"]},
+            {"name": "islamic-posting.shariah-blocked", "topic": "isb.posting.screening", "payload": ["postingId", "accountRef", "shariahScreeningOutcome", "reasonCode", "criteriaSetRef", "screenerType"]},
+            {"name": "islamic-posting.profit-attributed", "topic": "isb.posting.profit", "payload": ["postingId", "accountRef", "distributionRunRef", "periodFrom", "periodTo", "distributionBasis", "smoothingApplied", "amountMinor", "currency"]}
+          ],
+          "shariah": {
+            "contractType": "PerRecord",
+            "capitalAtRisk": true,
+            "reviewed": false,
+            "reviewNote": "UNREVIEWED — requires named Shariah board sign-off. The postingKind enum is the single most compliance-bearing list in this fragment: it asserts what KINDS of money movement an Islamic bank has, and a wrong or missing kind is a mislabelled transaction on a customer's statement.",
+            "standards": [
+              {"ref": "AAOIFI SS 13 (Revised)", "title": "Mudarabah — §8/1 (a share of PROFIT, not of the balance)", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 46", "title": "Al-Wakalah Bi Al-Istithmar — §5/1 (agency fee is a fixed amount or a percentage of the amount invested), §6/6 (smoothing)", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "IFSB GN-3 (Dec 2010)", "title": "Guidance Note on the Practice of Smoothing the Profits Payout to IAH — fn.13", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "Bangladesh Bank IBRPD Circular 01", "title": "Islamic credit card Shariah screening — the only jurisdiction/product where transaction-level screening is regulation", "clauseText": false, "source": "DECISIONS.md WAVE 1/WAVE 3", "note": "Cited for SCOPE, not for rule content. No clause text extracted."},
+              {"ref": "ISO 20022 / ISO 18245", "title": "Purpose code and Merchant Category Code — the two weak inputs a screening gate actually has", "clauseText": false, "source": "DECISIONS.md WAVE 1", "note": "Not a Shariah standard. Listed because the gate's reliability is bounded by these."}
+            ]
+          },
+          "uncertain": [
+            "The postingKind enum is MY decomposition. It covers the contract types §7 names plus purification, zakat and charity, but I am not confident it is complete: Istisna progress billings, Salam delivery settlement and Sukuk coupon/periodic-distribution postings are each arguably their own kind and I folded them into the generic kinds. A missing kind is a mislabelled line on a customer statement, so a reviewer should treat this list as the first thing to extend.",
+            "Whether PROFIT_ACCRUED should exist as a posting at all is a genuine disagreement. Accrued (undeclared) profit is not yet the holder's property; booking it to the customer's ledger — even as an unavailable balance component — is arguably asserting an entitlement that does not exist. I modelled it as a posting whose balance component is non-guaranteed and whose inclusion in an AVAILABLE balance is rejected by ISB-IBA-06, but a reviewer may well rule that accrual belongs only in the bank's internal ledger.",
+            "The ta'widh/gharamah distinction (ISB-IPO-06, ISB-IPO-07) is reported in this estate's research but no clause text was extracted. Both rules therefore rest on reported practice. The amount of ta'widh permitted, and whether any part of a gharamah may ever offset the bank's actual recovery costs, are jurisdiction questions I did not model.",
+            "What happens to a posting whose screening outcome is BLOCK AFTER it was already booked (an outcome arriving late) — reverse it, freeze it, or refer it — is not modelled. I only modelled the synchronous case (ISB-IPO-08) and the reversal reason SHARIAH_NON_COMPLIANCE that a late block would use. The policy is an owner decision.",
+            "A BLOCK outcome still has no conformant OBIE error code (OBError1.ErrorCode is exactly 4 chars from OBExternalStatusReason1Code, which has no permissibility value). This fragment records the outcome; it does not invent an error code, because inventing one breaks either the 4-char constraint or the published code set."
+          ],
+          "openBankingMapping": {
+            "obieSurface": "GET /open-banking/v4.0/aisp/accounts/{AccountId}/transactions → OBReadTransaction6/OBTransaction6",
+            "fields": [
+              {"field": "postingId", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBTransaction6.TransactionId"},
+              {"field": "amountMinor (magnitude) + currency", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBTransaction6.Amount", "note": "magnitude only — the pattern is unsigned"},
+              {"field": "creditDebitIndicator", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBTransaction6.CreditDebitIndicator"},
+              {"field": "bookingAt / valueDate", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBTransaction6.BookingDateTime / ValueDateTime"},
+              {"field": "status", "verdict": "REPRESENTABLE_WITH_LOSS", "obie": "OBTransaction6.Status (BOOK|FUTR|INFO|PDNG|RJCT)", "note": "BOOKED/PENDING/REJECTED map; REVERSED has no code and is served as a second BOOK posting."},
+              {"field": "transactionInformation", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBTransaction6.TransactionInformation"},
+              {"field": "obieProprietaryCode / obieProprietaryCodeIssuer", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBTransaction6.ProprietaryBankTransactionCode {Code, Issuer}", "note": "the conformant carrier of postingKind — a DEFINED field, so nothing is extended"},
+              {"field": "counterpartyAccountRef / counterpartyName", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBTransaction6.CreditorAccount / DebtorAccount"},
+              {"field": "chargeAmountMinor", "verdict": "REPRESENTABLE_WITH_LOSS", "obie": "OBTransaction6.ChargeAmount", "note": "the amount travels; WHAT KIND of charge (ujrah vs ta'widh vs gharamah) does not"},
+              {"field": "postingKind (its CONSEQUENCES)", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info / profit-distributions", "note": "the kind rides in ProprietaryBankTransactionCode; that PROFIT_DECLARED is not yet payable, that a gharamah never becomes bank income, and that CAPITAL_LOSS_ALLOCATION reduces the holder's own capital do not."},
+              {"field": "contra-legs[]", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "not published to TPPs at all", "note": "The double-entry contra side is internal. A TPP sees the customer leg only. Deliberate: publishing SHAREHOLDERS_FUND vs CHARITY_POOL ledger movements would leak bank internals."},
+              {"field": "profit-attribution (+ PER/IRR applied)", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "profit-distributions"},
+              {"field": "shariahScreeningOutcome + shariah-screening", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "shariah-compliance", "note": "and a BLOCK has no conformant OBIE error code — see uncertain[]"},
+              {"field": "purificationRequired / purificationCaseRef", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "shariah-compliance.PurificationApplicable"},
+              {"field": "journalId / sourceDomainRef / sourcePostingRef", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "not published", "note": "internal ledger plumbing; OBIE's TransactionReference is not a safe home for an internal id"}
+            ]
+          }
+        },
+        {
+          "name": "Islamic Balance",
+          "functionalPattern": "Maintain",
+          "assetType": "Islamic Balance",
+          "controlRecord": {
+            "name": "Islamic Balance Maintenance Agreement",
+            "table": "islamic_balance",
+            "identifiers": [
+              {"name": "balanceId", "type": "id", "format": "IBAL-<32hex>", "primary": true},
+              {"name": "accountRef", "type": "ref", "refDomain": "Islamic Account"},
+              {"name": "lastPostingRef", "type": "ref", "refDomain": "Islamic Posting", "note": "the posting this projection includes up to — a balance is DERIVED, never authored"}
+            ],
+            "money": [
+              {"name": "amountMinor", "currencyField": "currency", "signed": true, "meaning": "the balance itself; sign carried here, direction published via creditDebitIndicator"},
+              {"name": "guaranteedAmountMinor", "currencyField": "currency", "signed": false, "meaning": "the portion the bank actually guarantees. ZERO on a Mudarabah investment account — which is the whole point of this domain."},
+              {"name": "atRiskAmountMinor", "currencyField": "currency", "signed": false, "meaning": "the portion exposed to capital loss borne by the holder"},
+              {"name": "declaredProfitIncludedMinor", "currencyField": "currency", "signed": true, "meaning": "declared and therefore owed profit already inside amountMinor"},
+              {"name": "accruedProfitIncludedMinor", "currencyField": "currency", "signed": true, "meaning": "accrued but UNDECLARED profit inside amountMinor. Not yet the holder's property — ISB-IBA-06 keeps it out of any AVAILABLE balance type."}
+            ],
+            "fields": [
+              {"name": "balanceId", "type": "id", "required": true},
+              {"name": "accountRef", "type": "ref", "required": true, "refDomain": "Islamic Account"},
+              {"name": "balanceType", "type": "enum", "required": true, "values": ["OPENING_BOOKED", "CLOSING_BOOKED", "CLOSING_AVAILABLE", "INTERIM_BOOKED", "INTERIM_AVAILABLE", "FORWARD_AVAILABLE", "INFORMATION"], "note": "CHOSEN to be exactly 1:1 onto OBBalanceType1Code OPBD|CLBD|CLAV|ITBD|ITAV|FWAV|INFO. No Islamic balance type was invented: an invented code is a conformance failure, and the Islamic truth belongs in the components and the guaranteed/at-risk split, not in a new type code."},
+              {"name": "currency", "type": "currency", "required": true},
+              {"name": "amountMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "creditDebitIndicator", "type": "enum", "required": true, "values": ["CREDIT", "DEBIT"]},
+              {"name": "guaranteedAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "atRiskAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "declaredProfitIncludedMinor", "type": "money", "required": false, "currencyField": "currency"},
+              {"name": "accruedProfitIncludedMinor", "type": "money", "required": false, "currencyField": "currency"},
+              {"name": "includesUnrealisedProfit", "type": "bool", "required": true},
+              {"name": "smoothingApplied", "type": "bool", "required": true},
+              {"name": "smoothingDisclosureRef", "type": "ref", "required": false, "refDomain": "Profit Equalization Reserve"},
+              {"name": "fundsConfirmationAnswerable", "type": "bool", "required": true, "note": "false whenever the account is capital-at-risk. openbank-funds must REFUSE on false, not answer FundsAvailable:false (DESIGN.md §7 behavioural rule)."},
+              {"name": "asOf", "type": "timestamp", "required": true},
+              {"name": "lastPostingRef", "type": "ref", "required": true, "refDomain": "Islamic Posting"},
+              {"name": "postingSequence", "type": "int64", "required": true, "note": "the ledger sequence this projection includes up to. Makes the balance replayable and verifiable rather than asserted."},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "updatedAt", "type": "timestamp", "required": true}
+            ]
+          },
+          "behaviourQualifiers": [
+            {
+              "name": "Balance Component",
+              "path": "balance-components",
+              "cardinality": "1..n",
+              "fields": [
+                {"name": "componentKind", "type": "enum", "required": true, "values": ["PRINCIPAL", "DECLARED_PROFIT", "ACCRUED_PROFIT", "HIBAH", "PER_SHARE", "IRR_SHARE", "CHARGES", "UNSETTLED_POSTINGS", "CAPITAL_LOSS"]},
+                {"name": "componentAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+                {"name": "guaranteed", "type": "bool", "required": true},
+                {"name": "withdrawable", "type": "bool", "required": true, "note": "declared profit is withdrawable; accrued profit is not. This boolean is the honest answer OBIE's single 'available' number cannot give."}
+              ],
+              "note": "THE decomposition. One balance number is a true sum and a misleading answer; these components are what makes it honest, and they are entirely unrepresentable in OBIE."
+            },
+            {
+              "name": "Credit Line",
+              "path": "credit-lines",
+              "cardinality": "0..n",
+              "fields": [
+                {"name": "included", "type": "bool", "required": true},
+                {"name": "limitType", "type": "enum", "required": true, "values": ["AVAILABLE", "CREDIT", "EMERGENCY", "PRE_AGREED", "TEMPORARY"], "note": "exactly OBIE's CreditLine.Type values"},
+                {"name": "limitAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+                {"name": "instrument", "type": "enum", "required": true, "values": ["QARD_HASSAN", "TAWARRUQ", "NONE"], "note": "an Islamic facility is a contract, not an overdraft. Not representable on the OBIE surface."},
+                {"name": "chargeBasis", "type": "enum", "required": true, "values": ["NONE", "FLAT_ADMIN_FEE"], "note": "deliberately only two values: there is no TIME_BASED option to choose by accident."}
+              ]
+            },
+            {
+              "name": "Projection Watermark",
+              "path": "projection-watermark",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "watermarkPostingSequence", "type": "int64", "required": true},
+                {"name": "recomputedAt", "type": "timestamp", "required": true},
+                {"name": "replayVerifiedAt", "type": "timestamp", "required": false, "note": "when the projection was last proved equal to a full replay of the posting ledger"}
+              ]
+            }
+          ],
+          "rules": [
+            {"id": "ISB-IBA-01", "assert": "currency == ref(Islamic Account).currency", "onViolation": "reject", "code": "BALANCE_CURRENCY_MISMATCH", "cite": ["DESIGN.md §5.1 / §6 — the minor-unit exponent is a property of the currency (BHD 3, JPY 0), so a balance whose currency disagrees with its account cannot be converted safely."]},
+            {"id": "ISB-IBA-02", "assert": "sum(balance-components.componentAmountMinor) == amountMinor", "onViolation": "reject", "code": "BALANCE_COMPONENT_IMBALANCE", "cite": ["The decomposition must add up to the published number, or the sibling surface and the OBIE surface disagree about the same account."]},
+            {"id": "ISB-IBA-03", "assert": "guaranteedAmountMinor + atRiskAmountMinor == amountMinor", "onViolation": "reject", "code": "BALANCE_RISK_SPLIT_IMBALANCE", "cite": ["Every minor unit is either guaranteed by the bank or at the holder's risk. There is no third state."], "note": "Stated for a CREDIT balance. For a DEBIT (financing receivable) balance the account is NOT_APPLICABLE and ISB-IAC-03 has already forced atRisk/guaranteed handling at the account level; the generated test covers both signs."},
+            {"id": "ISB-IBA-04", "assert": "ref(Islamic Account).capitalGuaranteed == false -> guaranteedAmountMinor == 0 && fundsConfirmationAnswerable == false", "onViolation": "reject", "code": "BALANCE_GUARANTEE_ON_CAPITAL_AT_RISK_ACCOUNT", "cite": ["DESIGN.md §7 ('a CBPII funds confirmation against a capital-at-risk Mudarabah investment account must REFUSE, not answer FundsAvailable: true. That would be a false statement about a balance the bank does not guarantee.')", "AAOIFI SS 45 (protection is not guarantee)", "BNM PD 028-63 ¶24.5"], "note": "The §7 behavioural rule, made a data invariant. openbank-funds enforces the refusal; this rule makes the refusal DERIVABLE from the record instead of a hardcoded list of product names."},
+            {"id": "ISB-IBA-05", "assert": "ref(Islamic Account).capitalGuaranteed == true -> atRiskAmountMinor == 0", "onViolation": "reject", "code": "BALANCE_RISK_ON_GUARANTEED_ACCOUNT", "cite": ["A Qard/Wadiah balance is repayable at par; none of it is at the holder's risk."]},
+            {"id": "ISB-IBA-06", "assert": "balanceType in [CLOSING_AVAILABLE, INTERIM_AVAILABLE, OPENING_BOOKED, CLOSING_BOOKED, INTERIM_BOOKED] -> accruedProfitIncludedMinor == 0 && includesUnrealisedProfit == false", "onViolation": "reject", "code": "BALANCE_INCLUDES_UNDECLARED_PROFIT", "cite": ["Undeclared profit is not the holder's property and must not appear in a balance a customer or a TPP reads as money they have. Only FORWARD_AVAILABLE and INFORMATION may carry it, and only as indicative.", "AAOIFI SS 13 (Revised) §8/1 (entitlement is to a share of REALISED profit)", "IFSB-30 (Dec 2023) Principle 18 ¶276"], "note": "This is the rule a conventional core does not need and an Islamic one cannot do without. It is also the strongest argument for modelling balance as its own domain: no product domain could enforce it alone."},
+            {"id": "ISB-IBA-07", "assert": "smoothingApplied == true -> present(smoothingDisclosureRef)", "onViolation": "flag", "code": "BALANCE_SMOOTHING_UNDISCLOSED", "cite": ["AAOIFI SS 46 §6/6 and IFSB GN-3 (Dec 2010) PERMIT smoothing with disclosure", "BNM PD 028-63 ¶13.5 PROHIBITS smoothing/DCR"], "note": "A JURISDICTIONAL FORK, not a feature. 'flag' because in a BNM jurisdiction the correct behaviour is to reject smoothing entirely — which is a jurisdiction configuration this fragment deliberately does not hardcode."},
+            {"id": "ISB-IBA-08", "assert": "unique(accountRef, balanceType, currency)", "onViolation": "reject", "code": "BALANCE_TYPE_DUPLICATE", "cite": ["One current projection per (account, type, currency). Two rows for CLAV is how two different 'available balances' get served to two TPPs."]},
+            {"id": "ISB-IBA-09", "assert": "count(credit-lines) > 0 -> credit-lines.chargeBasis in [NONE, FLAT_ADMIN_FEE] && credit-lines.instrument != NONE", "onViolation": "reject", "code": "BALANCE_CREDIT_LINE_NOT_SHARIAH_STRUCTURED", "cite": ["A conventional overdraft charges for TIME on money lent, which is precisely what an Islamic facility may not do. A Qard Hassan line may carry an actual-cost administrative fee; a Tawarruq line is a sale structure. UNVERIFIED at clause level in this estate's research — the enum deliberately offers no time-based option, so the model cannot express the impermissible case."]},
+            {"id": "ISB-IBA-10", "assert": "postingSequence >= projection-watermark.watermarkPostingSequence && asOf >= ref(Islamic Posting).bookingAt", "onViolation": "reject", "code": "BALANCE_PROJECTION_WENT_BACKWARDS", "cite": ["A projection may only move forward over an append-only ledger. A balance that regresses is serving a stale number as current."]},
+            {"id": "ISB-IBA-11", "assert": "creditDebitIndicator == DEBIT -> amountMinor < 0 && creditDebitIndicator == CREDIT -> amountMinor > 0", "onViolation": "reject", "code": "BALANCE_SIGN_INDICATOR_DISAGREE", "cite": ["Same unsigned-amount hazard as ISB-IPO-03: OBIE's amount pattern permits no sign, so direction travels in CreditDebitIndicator and the two must agree before the boundary converts."]},
+            {"id": "ISB-IBA-12", "assert": "sum(balance-components.componentAmountMinor) == amountMinor && immutable(accountRef) && immutable(balanceType)", "onViolation": "reject", "code": "BALANCE_IDENTITY_MUTATED", "cite": ["A balance row's identity (which account, which type) is fixed; only its value and watermark move."]}
+          ],
+          "events": [
+            {"name": "islamic-balance.updated", "topic": "isb.balance.projection", "payload": ["balanceId", "accountRef", "balanceType", "amountMinor", "currency", "creditDebitIndicator", "asOf", "postingSequence"]},
+            {"name": "islamic-balance.capital-loss-recognised", "topic": "isb.balance.capital-loss", "payload": ["balanceId", "accountRef", "atRiskAmountMinor", "currency", "componentKind", "componentAmountMinor", "asOf"]},
+            {"name": "islamic-balance.funds-confirmation-refused", "topic": "isb.balance.refusal", "payload": ["balanceId", "accountRef", "fundsConfirmationAnswerable", "asOf"]},
+            {"name": "islamic-balance.smoothing-applied", "topic": "isb.balance.smoothing", "payload": ["balanceId", "accountRef", "smoothingApplied", "smoothingDisclosureRef", "currency"]}
+          ],
+          "shariah": {
+            "contractType": "PerRecord",
+            "capitalAtRisk": true,
+            "reviewed": false,
+            "reviewNote": "UNREVIEWED — requires named Shariah board sign-off. The guaranteed/at-risk split and the withdrawable flag on each component are the two modelling claims most in need of review: they are what a customer and a TPP will read as 'how much money do I have'.",
+            "standards": [
+              {"ref": "AAOIFI SS 13 (Revised)", "title": "Mudarabah — §8/1", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 45", "title": "Protection of Capital and Investments", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 46", "title": "Al-Wakalah Bi Al-Istithmar — §6/6 (smoothing permitted with disclosure)", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "IFSB GN-3 (Dec 2010)", "title": "Guidance Note on the Practice of Smoothing the Profits Payout to IAH", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "BNM PD 028-63", "title": "Investment Account policy document — ¶13.5 (smoothing/DCR prohibited), ¶24.5", "clauseText": true, "source": "research/agent-investigations-shariah.md", "note": "CONTRADICTS AAOIFI SS 46 §6/6 and IFSB GN-3. Jurisdiction configuration, never a default."},
+              {"ref": "IFSB-30 (Dec 2023)", "title": "Revised Guiding Principles on Corporate Governance for IIFS — Principle 18 ¶276", "clauseText": true, "source": "research/agent-investigations-shariah.md"}
+            ]
+          },
+          "uncertain": [
+            "The guaranteed/at-risk SPLIT is arithmetic I invented. In practice the at-risk amount of a Mudarabah IAH balance is not a stored number but a consequence of the pool's performance at a valuation date, and whether any part of a Mudarabah balance is ever 'guaranteed' (e.g. an unpaid declared-profit amount that has become a debt of the bank) is exactly the kind of question only an SSB can settle. I modelled declared profit as guaranteed-and-withdrawable and accrued profit as neither; a reviewer may disagree with the first half.",
+            "ISB-IBA-06 forbids accrued profit in every BOOKED and AVAILABLE balance type. That is my reading of 'undeclared profit is not yours'. The alternative industry practice — showing an indicative accrual as part of a booked balance with a disclaimer — is common and I rejected it as misleading. This is a judgement call, flagged as such.",
+            "PER/IRR SHARE as a balance component assumes the holder has an attributable share of the reserves. Whether an IAH's PER share is their property while in the reserve, and what happens to it on account closure, is a known-contested area; AAOIFI and BNM do not agree even on whether the reserve may exist.",
+            "I did not model multi-currency accounts (OBIE's Balance.Amount.SubType BCUR/LCUR hints at it). ISB-IBA-08's uniqueness key includes currency, so the schema permits it, but no rule governs how a multi-currency Islamic account's at-risk split behaves across currencies — and FX on a capital-at-risk pool raises its own Shariah questions I could not model.",
+            "The 'withdrawable' flag per component is mine and has no standard behind it. It exists because a single OBIE 'available' number cannot be honest, and a reviewer should check it against the actual withdrawal terms of each product rather than accept it as modelled."
+          ],
+          "openBankingMapping": {
+            "obieSurface": "GET /open-banking/v4.0/aisp/accounts/{AccountId}/balances and /balances → OBReadBalance1",
+            "fields": [
+              {"field": "amountMinor (magnitude) + currency", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBReadBalance1.Data.Balance[].Amount {Amount, Currency, SubType}"},
+              {"field": "creditDebitIndicator", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "…Balance[].CreditDebitIndicator"},
+              {"field": "balanceType", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "…Balance[].Type (OBBalanceType1Code)", "note": "1:1 by construction"},
+              {"field": "asOf", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "…Balance[].DateTime"},
+              {"field": "credit-lines[].included / limitType / limitAmountMinor", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "…Balance[].CreditLine[] {Included, Type, Amount}"},
+              {"field": "credit-lines[].instrument / chargeBasis", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.CreditFacility", "note": "that the line is a Qard Hassan and carries no time-based charge is the only thing that makes it permissible, and OBIE has nowhere to say it"},
+              {"field": "guaranteedAmountMinor / atRiskAmountMinor", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.GuaranteedAmount / AtRiskAmount", "note": "OBIE's model presumes the balance is a liability of the ASPSP. One number where the honest answer needs two."},
+              {"field": "balance-components[]", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.BalanceComponents[]"},
+              {"field": "declaredProfitIncludedMinor / accruedProfitIncludedMinor / includesUnrealisedProfit", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "profit-distributions (Status Declared|Accrued|Paid)"},
+              {"field": "smoothingApplied / smoothingDisclosureRef", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "profit-distributions.SmoothingApplied {PERAmount, IRRAmount}"},
+              {"field": "fundsConfirmationAnswerable", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.FundsConfirmationEligible", "note": "and expressed on the CBPII surface as a REFUSAL, because /funds-confirmations has only true/false and no 'cannot answer'"},
+              {"field": "postingSequence / projection-watermark", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "not published", "note": "internal verifiability, not TPP data"}
+            ]
+          }
+        },
+        {
+          "name": "Islamic Statement",
+          "functionalPattern": "Process",
+          "assetType": "Islamic Account Statement",
+          "controlRecord": {
+            "name": "Islamic Account Statement Procedure",
+            "table": "islamic_statement",
+            "identifiers": [
+              {"name": "statementId", "type": "id", "format": "ISTM-<32hex>", "primary": true},
+              {"name": "accountRef", "type": "ref", "refDomain": "Islamic Account"},
+              {"name": "statementReference", "type": "string", "note": "the human/bank-facing reference published as OBStatement2.StatementReference"},
+              {"name": "profitDistributionRunRef", "type": "ref", "refDomain": "Profit Calculation And Distribution"}
+            ],
+            "money": [
+              {"name": "openingBalanceMinor", "currencyField": "currency", "signed": true, "meaning": "balance at periodFrom"},
+              {"name": "closingBalanceMinor", "currencyField": "currency", "signed": true, "meaning": "balance at periodTo"},
+              {"name": "totalCreditsMinor", "currencyField": "currency", "signed": false, "meaning": "sum of credit movements in the period"},
+              {"name": "totalDebitsMinor", "currencyField": "currency", "signed": false, "meaning": "sum of debit movements in the period"},
+              {"name": "declaredProfitMinor", "currencyField": "currency", "signed": true, "meaning": "profit DECLARED in the period — an entitlement"},
+              {"name": "paidProfitMinor", "currencyField": "currency", "signed": true, "meaning": "profit actually PAID in the period"},
+              {"name": "accruedProfitMinor", "currencyField": "currency", "signed": true, "meaning": "accrued, undeclared, INDICATIVE only (ISB-IST-10 flags its presence)"},
+              {"name": "hibahMinor", "currencyField": "currency", "signed": true, "meaning": "discretionary gift on a Wadiah/Qard balance — NOT profit, and must never be labelled as profit"},
+              {"name": "agencyFeeChargedMinor", "currencyField": "currency", "signed": false, "meaning": "ujrah taken by the bank as wakil/mudarib in the period"},
+              {"name": "perAppliedMinor", "currencyField": "currency", "signed": true, "meaning": "profit equalization reserve applied to this account in the period"},
+              {"name": "irrAppliedMinor", "currencyField": "currency", "signed": true, "meaning": "investment risk reserve applied to this account in the period"},
+              {"name": "purificationAmountMinor", "currencyField": "currency", "signed": false, "meaning": "income purified out in the period"},
+              {"name": "tawidhChargedMinor", "currencyField": "currency", "signed": false, "meaning": "ta'widh (actual-loss compensation) charged in the period"},
+              {"name": "gharamahDonatedMinor", "currencyField": "currency", "signed": false, "meaning": "gharamah donated to charity in the period — never bank income (ISB-IST-07)"}
+            ],
+            "fields": [
+              {"name": "statementId", "type": "id", "required": true},
+              {"name": "accountRef", "type": "ref", "required": true, "refDomain": "Islamic Account"},
+              {"name": "statementReference", "type": "string", "required": true},
+              {"name": "type", "type": "enum", "required": true, "values": ["ACCOUNT_OPENING", "REGULAR_PERIODIC", "INTERIM", "ANNUAL", "ACCOUNT_CLOSURE"], "note": "exactly OBInternalStatementType1Code's five values. The 'annual profit disclosure' statement is type ANNUAL — no new code invented."},
+              {"name": "currency", "type": "currency", "required": true},
+              {"name": "periodFrom", "type": "date", "required": true},
+              {"name": "periodTo", "type": "date", "required": true},
+              {"name": "status", "type": "enum", "required": true, "values": ["DRAFT", "ISSUED", "SUPERSEDED"], "note": "SUPERSEDED, never edited: a corrected statement is a new row that points at the old one."},
+              {"name": "supersedesStatementRef", "type": "ref", "required": false, "refDomain": "Islamic Statement"},
+              {"name": "openingBalanceMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "closingBalanceMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "totalCreditsMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "totalDebitsMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "declaredProfitMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "paidProfitMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "accruedProfitMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "hibahMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "agencyFeeChargedMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "perAppliedMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "irrAppliedMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "purificationAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "tawidhChargedMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "gharamahDonatedMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "profitDistributionRunRef", "type": "ref", "required": false, "refDomain": "Profit Calculation And Distribution"},
+              {"name": "purificationCaseRef", "type": "ref", "required": false, "refDomain": "Income Purification"},
+              {"name": "zakatAssessmentRef", "type": "ref", "required": false, "refDomain": "Zakat Calculation"},
+              {"name": "shariahDisclosureVersionRef", "type": "ref", "required": true, "refDomain": "Shariah Compliance Review"},
+              {"name": "ssbApprovalReference", "type": "ref", "required": true, "refDomain": "Shariah Supervisory Board Directory"},
+              {"name": "issuedAt", "type": "timestamp", "required": false},
+              {"name": "createdAt", "type": "timestamp", "required": true}
+            ]
+          },
+          "behaviourQualifiers": [
+            {
+              "name": "Statement Line",
+              "path": "statement-lines",
+              "cardinality": "1..n",
+              "fields": [
+                {"name": "postingRef", "type": "ref", "required": true, "refDomain": "Islamic Posting"},
+                {"name": "lineBookingAt", "type": "timestamp", "required": true},
+                {"name": "lineAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+                {"name": "lineCreditDebitIndicator", "type": "enum", "required": true, "values": ["CREDIT", "DEBIT"]},
+                {"name": "linePostingKind", "type": "enum", "required": true, "values": ["DEPOSIT_IN", "WITHDRAWAL_OUT", "TRANSFER_IN", "TRANSFER_OUT", "UNIT_SUBSCRIPTION", "UNIT_REDEMPTION", "PROFIT_ACCRUED", "PROFIT_DECLARED", "PROFIT_PAID", "HIBAH", "PER_TRANSFER", "IRR_TRANSFER", "CAPITAL_LOSS_ALLOCATION", "MURABAHA_COST_PORTION", "MURABAHA_PROFIT_PORTION", "IJARA_RENTAL", "IJARA_ADVANCE_RENTAL", "AGENCY_FEE_UJRAH", "ADMIN_FEE", "TAWIDH_ACTUAL_LOSS", "GHARAMAH_PENALTY_TO_CHARITY", "PURIFICATION_DEBIT", "ZAKAT_DEBIT", "FX_SETTLEMENT", "REVERSAL"]},
+                {"name": "lineObieProprietaryCode", "type": "string", "required": true}
+              ],
+              "note": "Served on the OBIE surface by GET /statements/{StatementId}/transactions, mapped exactly as Islamic Posting is."
+            },
+            {
+              "name": "Profit Disclosure",
+              "path": "profit-disclosure",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "distributionRunRef", "type": "ref", "required": true, "refDomain": "Profit Calculation And Distribution"},
+                {"name": "appliedProfitSharingRatio", "type": "ratio", "required": true, "note": "THE deliberate exception to noDuplicationOfComplianceFields: an immutable snapshot of the ratio that actually applied, because printing it IS the disclosure obligation. ISB-IST-12 asserts it equalled the owning domain's value at issue."},
+                {"name": "disclosureBasis", "type": "enum", "required": true, "values": ["DAILY_AVERAGE", "MONTHLY_MINIMUM", "WEIGHTED_AVERAGE"]},
+                {"name": "grossPoolProfitDisclosedMinor", "type": "money", "required": false, "currencyField": "currency"},
+                {"name": "smoothingDisclosedAt", "type": "timestamp", "required": false},
+                {"name": "indicativeOnly", "type": "bool", "required": true, "note": "true where the figure is accrued rather than declared"}
+              ]
+            },
+            {
+              "name": "Fee And Charge",
+              "path": "fees-and-charges",
+              "cardinality": "0..n",
+              "fields": [
+                {"name": "chargeKind", "type": "enum", "required": true, "values": ["UJRAH_AGENCY_FEE", "WAKALA_PERFORMANCE_INCENTIVE", "ADMIN_FEE", "TAWIDH", "GHARAMAH"]},
+                {"name": "chargeAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+                {"name": "chargeBasis", "type": "enum", "required": true, "values": ["FLAT", "RATIO_OF_INVESTED_AMOUNT", "RATIO_OF_PROFIT", "ACTUAL_COST"]},
+                {"name": "chargeRatio", "type": "ratio", "required": false, "note": "EXACT ratio where chargeBasis is ratio-based. Never a float, never a percentage."},
+                {"name": "destination", "type": "enum", "required": true, "values": ["SHAREHOLDERS_FUND", "CHARITY_POOL", "PARTICIPANTS_FUND"], "note": "where the money actually goes. GHARAMAH may only ever be CHARITY_POOL (ISB-IST-07)."}
+              ]
+            },
+            {
+              "name": "Delivery",
+              "path": "delivery",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "channel", "type": "enum", "required": true, "values": ["POST", "EMAIL", "ONLINE", "MOBILE", "BRANCH"]},
+                {"name": "deliveredAt", "type": "timestamp", "required": false},
+                {"name": "fileFormat", "type": "enum", "required": false, "values": ["PDF", "CSV", "JSON", "XML"]},
+                {"name": "fileRef", "type": "string", "required": false, "note": "served by GET /statements/{StatementId}/file"}
+              ]
+            }
+          ],
+          "rules": [
+            {"id": "ISB-IST-01", "assert": "openingBalanceMinor + totalCreditsMinor - totalDebitsMinor == closingBalanceMinor", "onViolation": "reject", "code": "STATEMENT_DOES_NOT_FOOT", "cite": ["A statement that does not foot is not a statement. This is the one arithmetic check a customer performs."]},
+            {"id": "ISB-IST-02", "assert": "sum(statement-lines.lineAmountMinor) == closingBalanceMinor - openingBalanceMinor", "onViolation": "reject", "code": "STATEMENT_LINES_DO_NOT_RECONCILE", "cite": ["The lines must explain the whole movement; an unexplained delta is an unposted or hidden entry."]},
+            {"id": "ISB-IST-03", "assert": "periodFrom < periodTo", "onViolation": "reject", "code": "STATEMENT_PERIOD_INVALID", "cite": ["Interval integrity."]},
+            {"id": "ISB-IST-04", "assert": "onTransition(DRAFT -> ISSUED): appendOnly(islamic_statement) && immutable(closingBalanceMinor) && immutable(declaredProfitMinor) && immutable(profit-disclosure.appliedProfitSharingRatio)", "onViolation": "reject", "code": "STATEMENT_MUTATED_AFTER_ISSUE", "cite": ["An issued statement is a disclosure document. A correction is a new SUPERSEDED-linked statement, never an edit (DESIGN.md §5.8)."]},
+            {"id": "ISB-IST-05", "assert": "declaredProfitMinor != 0 -> present(profit-disclosure.distributionRunRef) && present(profit-disclosure.appliedProfitSharingRatio) && present(profitDistributionRunRef)", "onViolation": "reject", "code": "STATEMENT_PROFIT_WITHOUT_DISCLOSURE", "cite": ["IFSB-30 (Dec 2023) Principle 18 ¶276 (the sharing ratio must be declared)", "AAOIFI SS 13 (Revised) §8/1 (a share of PROFIT)"], "note": "No profit figure may be printed without the ratio and the run that produced it. This is the rule that makes the statement a disclosure rather than a number."},
+            {"id": "ISB-IST-06", "assert": "perAppliedMinor != 0 || irrAppliedMinor != 0 -> present(profit-disclosure.smoothingDisclosedAt)", "onViolation": "reject", "code": "STATEMENT_SMOOTHING_UNDISCLOSED", "cite": ["AAOIFI SS 46 §6/6 and IFSB GN-3 (Dec 2010) permit smoothing WITH disclosure — the disclosure is the condition, not a courtesy", "BNM PD 028-63 ¶13.5 prohibits it outright (jurisdiction fork)"]},
+            {"id": "ISB-IST-07", "assert": "fees-and-charges.chargeKind == GHARAMAH -> fees-and-charges.destination == CHARITY_POOL && gharamahDonatedMinor > 0", "onViolation": "reject", "code": "STATEMENT_PENALTY_AS_BANK_INCOME", "cite": ["A gharamah is a deterrent donated to charity, not revenue. Mirrors ISB-IPO-06 at the ledger level. UNVERIFIED at clause level in this estate's research."]},
+            {"id": "ISB-IST-08", "assert": "fees-and-charges.chargeKind == UJRAH_AGENCY_FEE -> fees-and-charges.chargeBasis in [FLAT, RATIO_OF_INVESTED_AMOUNT]", "onViolation": "reject", "code": "STATEMENT_AGENCY_FEE_BASIS_INVALID", "cite": ["AAOIFI SS 46 §5/1 (the agency fee is a fixed amount or a percentage of the amount INVESTED, capped and floored — not a share of profit)"], "note": "RATIO_OF_PROFIT is in the enum because a MUDARIB share legitimately is a ratio of profit; this rule stops it being used for a WAKIL's fee."},
+            {"id": "ISB-IST-09", "assert": "hibahMinor != 0 -> ref(Islamic Account).contractType in [WADIAH, QARD_HASSAN] && declaredProfitMinor == 0", "onViolation": "reject", "code": "STATEMENT_HIBAH_LABELLED_AS_PROFIT", "cite": ["A gift on a guaranteed balance is discretionary and unpromised; presenting it as profit implies an entitlement and turns a Qard into an interest-bearing loan in substance. The estate already separates 'Hibah Discretionary Gift' from 'Profit Calculation And Distribution' for this reason."]},
+            {"id": "ISB-IST-10", "assert": "accruedProfitMinor != 0 -> profit-disclosure.indicativeOnly == true", "onViolation": "flag", "code": "STATEMENT_ACCRUED_PROFIT_SHOWN", "cite": ["Accrued, undeclared profit is not an entitlement. Showing it at all is a judgement call; showing it unlabelled is a misstatement. 'flag' so the Shariah function sees every statement that does it."]},
+            {"id": "ISB-IST-11", "assert": "purificationAmountMinor != 0 -> present(purificationCaseRef)", "onViolation": "reject", "code": "STATEMENT_PURIFICATION_WITHOUT_CASE", "cite": ["A purification figure without the case that computed it is an unauditable number. The amount is owned by 'Income Purification'."]},
+            {"id": "ISB-IST-12", "assert": "profit-disclosure.appliedProfitSharingRatio == ref(Profit Calculation And Distribution).profitSharingRatio", "onViolation": "reject", "code": "STATEMENT_RATIO_SNAPSHOT_DIVERGED", "cite": ["conventions.noDuplicationOfComplianceFields — the snapshot is permitted ONLY because this rule proves it equalled the owning domain's value at issue time. Without this rule the snapshot would be a second, unverifiable compliance claim."]},
+            {"id": "ISB-IST-13", "assert": "ref(Islamic Account).capitalGuaranteed == false -> absent(depositGuaranteeAmountMinor)", "onViolation": "reject", "code": "STATEMENT_DEPOSIT_GUARANTEE_ON_AT_RISK_ACCOUNT", "cite": ["OBInternalStatementAmountType1Code includes UK.OBIE.FSCSInsurance (a deposit-guarantee amount). Publishing one on a capital-at-risk Mudarabah account is a false statement of the same class as the CBPII FundsAvailable:true that DESIGN.md §7 forbids.", "DESIGN.md §7"], "note": "A schema-level assertion: no such field exists in this control record, and the generator must FAIL the build if one is added. The OBIE serialiser must likewise never emit that StatementAmount code for a capital-at-risk account."},
+            {"id": "ISB-IST-14", "assert": "type == ACCOUNT_CLOSURE -> paidProfitMinor == declaredProfitMinor && accruedProfitMinor == 0", "onViolation": "flag", "code": "STATEMENT_CLOSURE_WITH_UNSETTLED_PROFIT", "cite": ["A closing statement with declared-but-unpaid profit leaves an entitlement with no account to pay it into. 'flag' rather than 'reject' because the settlement may legitimately follow the closing statement in some products — which is itself something a reviewer should confirm."]}
+          ],
+          "events": [
+            {"name": "islamic-statement.issued", "topic": "isb.statement.lifecycle", "payload": ["statementId", "accountRef", "type", "periodFrom", "periodTo", "openingBalanceMinor", "closingBalanceMinor", "currency", "issuedAt"]},
+            {"name": "islamic-statement.profit-disclosed", "topic": "isb.statement.profit", "payload": ["statementId", "accountRef", "declaredProfitMinor", "paidProfitMinor", "currency", "distributionRunRef", "appliedProfitSharingRatio", "disclosureBasis", "indicativeOnly"]},
+            {"name": "islamic-statement.superseded", "topic": "isb.statement.lifecycle", "payload": ["statementId", "supersedesStatementRef", "status"]},
+            {"name": "islamic-statement.delivered", "topic": "isb.statement.delivery", "payload": ["statementId", "channel", "deliveredAt", "fileFormat", "fileRef"]}
+          ],
+          "shariah": {
+            "contractType": "PerRecord",
+            "capitalAtRisk": true,
+            "reviewed": false,
+            "reviewNote": "UNREVIEWED — requires named Shariah board sign-off. This is the domain where disclosure actually happens: every figure here is read by a customer as a statement of fact by the bank, so the profit-disclosure BQ and the hibah/profit separation (ISB-IST-09) need review before anything is published.",
+            "standards": [
+              {"ref": "IFSB-30 (Dec 2023)", "title": "Revised Guiding Principles on Corporate Governance for IIFS — Principle 18 ¶272/273/276/278 (IAH disclosure), Principle 19", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 13 (Revised)", "title": "Mudarabah — §8/1, §9/6", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 46", "title": "Al-Wakalah Bi Al-Istithmar — §5/1 (fee basis), §6/6 (smoothing disclosure)", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "IFSB GN-3 (Dec 2010)", "title": "Guidance Note on the Practice of Smoothing the Profits Payout to IAH — fn.13", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "BNM PD 028-63", "title": "Investment Account policy document — ¶13.5, ¶24.5, ¶27.3, ¶27.6", "clauseText": true, "source": "research/agent-investigations-shariah.md", "note": "Jurisdictional and contradictory on smoothing. Configuration, never a default."},
+              {"ref": "AAOIFI Financial Accounting Standards (IAH / profit distribution)", "title": "The FAS that actually govern the presentation of IAH profit on a statement", "clauseText": false, "source": "NOT OBTAINED by this estate's research", "note": "Named here so its ABSENCE is on the record. Every money label on this statement is a presentation choice no clause in this estate backs."}
+            ]
+          },
+          "uncertain": [
+            "The AAOIFI Financial Accounting Standards that govern how IAH profit, PER/IRR and purification are PRESENTED were never obtained by this estate's research (DECISIONS.md WAVE 3 says so for takaful; the same is true here). Every money field on this statement is therefore a presentation choice, not a standard-backed line item. This is the single biggest gap in my slice.",
+            "Zakat: I carry only zakatAssessmentRef and no zakat figure. Whether a statement must disclose a zakat base or a zakat deducted amount is jurisdictional (compulsory collection in some jurisdictions, voluntary elsewhere) and I could not model it from verified sources. ISB-IST has no zakat rule as a result — a deliberate omission, not an oversight.",
+            "ISB-IST-02 assumes every balance movement is explained by a statement line in the same period. Value-dated postings that book in one period and value in another break this, and I did not model which of bookingAt or valueDate governs period membership. That choice changes the arithmetic of ISB-IST-01 and ISB-IST-02 and a reviewer must fix it before either rule is generated.",
+            "I modelled gross pool profit as an OPTIONAL disclosure (grossPoolProfitDisclosedMinor). Whether an IAH is entitled to see the pool's gross result — and not only their own share — is exactly the kind of transparency question IFSB-30 Principle 18 addresses and I could not resolve from the extracted text.",
+            "The OBIE statement surface has published code sets for Fee, Interest, Benefit, Value, Rate and Amount types, and NONE of them has a profit, purification, ta'widh or zakat member. I did not pick a UK.OBIE.* code to approximate any of them: unlike AccountTypeCode (where a value is mandatory and some code must be chosen), these are optional, so the honest action is to omit them from the OBIE response entirely and serve them on the sibling. A reviewer may prefer approximation plus disclosure; I chose omission."
+          ],
+          "openBankingMapping": {
+            "obieSurface": "GET /open-banking/v4.0/aisp/accounts/{AccountId}/statements, /statements/{StatementId}, /statements/{StatementId}/transactions, /statements/{StatementId}/file → OBReadStatement2/OBStatement2",
+            "fields": [
+              {"field": "statementId / statementReference", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBStatement2.StatementId / StatementReference"},
+              {"field": "type", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBStatement2.Type (OBInternalStatementType1Code)", "note": "1:1 by construction"},
+              {"field": "periodFrom / periodTo / createdAt", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBStatement2.StartDateTime / EndDateTime / CreationDateTime"},
+              {"field": "openingBalanceMinor / closingBalanceMinor", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "OBStatement2.StatementAmount[] (UK.OBIE.StartingBalance / UK.OBIE.ClosingBalance)"},
+              {"field": "statement-lines[]", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "GET /statements/{StatementId}/transactions → OBTransaction6[]"},
+              {"field": "delivery.fileRef / fileFormat", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "GET /statements/{StatementId}/file"},
+              {"field": "agencyFeeChargedMinor, ADMIN_FEE charges", "verdict": "REPRESENTABLE_WITH_LOSS", "obie": "OBStatement2.StatementFee[]", "note": "the AMOUNT fits; no UK.OBIE fee code means ujrah, and UK.OBIE.LatePayment must NOT be reused for a gharamah because a gharamah is not a fee the bank keeps"},
+              {"field": "declaredProfitMinor / paidProfitMinor / accruedProfitMinor", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "profit-distributions (Status Declared|Accrued|Paid)", "note": "StatementInterest is FORBIDDEN as a carrier: non-conformant in intent, religiously wrong, and its Rate field is a float (OBRate1_1, type: number)"},
+              {"field": "profit-disclosure.appliedProfitSharingRatio / disclosureBasis", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "profit-distributions.AppliedProfitSharingRatio (exact int ratio)"},
+              {"field": "perAppliedMinor / irrAppliedMinor / smoothingDisclosedAt", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "profit-distributions.SmoothingApplied {PERAmount, IRRAmount}"},
+              {"field": "hibahMinor", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "profit-distributions.Hibah", "note": "no OBIE construct for a discretionary gift, and StatementBenefit's codes are Cashback/Insurance/TravelDiscount/TravelInsurance — none of which is a hibah"},
+              {"field": "purificationAmountMinor / tawidhChargedMinor / gharamahDonatedMinor", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "shariah-compliance (PurificationApplicable, LatePaymentPolicy Taawidh|Gharamah|CharityOnly)"},
+              {"field": "zakatAssessmentRef", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "shariah-compliance.ZakatTreatment"},
+              {"field": "ssbApprovalReference / shariahDisclosureVersionRef", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "shariah-compliance.SSBApprovalReference"},
+              {"field": "UK.OBIE.FSCSInsurance", "verdict": "FORBIDDEN_ON_OBIE_SURFACE", "obie": "OBStatement2.StatementAmount[] type code", "note": "ISB-IST-13 — a deposit-guarantee amount on a capital-at-risk account is a false statement"}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Islamic Position Keeping",
+      "serviceDomains": [
+        {
+          "name": "Islamic Position",
+          "functionalPattern": "Track",
+          "assetType": "Islamic Unitised Holding",
+          "controlRecord": {
+            "name": "Islamic Unitised Holding Tracking Position",
+            "table": "islamic_position",
+            "identifiers": [
+              {"name": "positionId", "type": "id", "format": "IPOS-<32hex>", "primary": true},
+              {"name": "accountRef", "type": "ref", "refDomain": "Islamic Account"},
+              {"name": "poolRef", "type": "ref", "refDomain": "AAOIFI Financial Accounting", "note": "the investment pool whose units this position holds"},
+              {"name": "instrumentRef", "type": "ref", "refDomain": "Sukuk Registry And Custody | Halal Equity Screening | Interbank Commodity Murabaha Desk"}
+            ],
+            "money": [
+              {"name": "unitCostMinor", "currencyField": "currency", "signed": false, "meaning": "acquisition cost per unit at the declared unit scale"},
+              {"name": "currentUnitValueMinor", "currencyField": "currency", "signed": false, "meaning": "latest valuation per unit (NAV or market), at valuationAt"},
+              {"name": "carryingAmountMinor", "currencyField": "currency", "signed": true, "meaning": "the position's carrying value on the holder's side"},
+              {"name": "unrealisedGainLossMinor", "currencyField": "currency", "signed": true, "meaning": "unrealised movement. NOT income and NOT withdrawable — ISB-IBA-06 keeps it out of any available balance."}
+            ],
+            "fields": [
+              {"name": "positionId", "type": "id", "required": true},
+              {"name": "accountRef", "type": "ref", "required": true, "refDomain": "Islamic Account"},
+              {"name": "poolRef", "type": "ref", "required": false, "refDomain": "AAOIFI Financial Accounting"},
+              {"name": "instrumentKind", "type": "enum", "required": true, "values": ["INVESTMENT_POOL_UNIT", "SUKUK", "SCREENED_EQUITY", "COMMODITY_MURABAHA_PLACEMENT", "IJARA_ASSET_INTEREST"]},
+              {"name": "instrumentRef", "type": "ref", "required": false, "refDomain": "Sukuk Registry And Custody | Halal Equity Screening | Interbank Commodity Murabaha Desk"},
+              {"name": "currency", "type": "currency", "required": true},
+              {"name": "unitCount", "type": "int64", "required": true, "note": "INTEGER units at the scale declared by unitScaleExponent. Fractional units are expressed by raising the exponent, never by a float: 1.5 units at exponent 1 is unitCount 15. Same discipline as money."},
+              {"name": "unitScaleExponent", "type": "int32", "required": true, "note": "0..9. Immutable: changing it reinterprets every historical unitCount."},
+              {"name": "unitCostMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "currentUnitValueMinor", "type": "money", "required": false, "currencyField": "currency"},
+              {"name": "carryingAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "unrealisedGainLossMinor", "type": "money", "required": true, "currencyField": "currency"},
+              {"name": "valuationAt", "type": "timestamp", "required": false},
+              {"name": "valuationBasis", "type": "enum", "required": true, "values": ["HISTORICAL_COST", "NAV_DECLARED", "MARK_TO_MARKET"]},
+              {"name": "capitalLossBorneBy", "type": "enum", "required": true, "values": ["ACCOUNT_HOLDER", "BANK"], "note": "no NOT_APPLICABLE: a position always has someone bearing its loss"},
+              {"name": "shariahScreeningStatus", "type": "enum", "required": true, "values": ["COMPLIANT", "NON_COMPLIANT", "UNDER_REVIEW", "NOT_SCREENED"]},
+              {"name": "screeningCriteriaSetRef", "type": "ref", "required": false, "refDomain": "Halal Equity Screening", "note": "a VERSIONED, SSB-approved criteria set. No screening THRESHOLD appears anywhere in this fragment — see uncertain[]."},
+              {"name": "purificationRequired", "type": "bool", "required": true},
+              {"name": "purificationCaseRef", "type": "ref", "required": false, "refDomain": "Income Purification"},
+              {"name": "zakatAssessmentRef", "type": "ref", "required": false, "refDomain": "Zakat Calculation"},
+              {"name": "pledgedAsCollateral", "type": "bool", "required": true, "note": "rahn. A pledged unit is not freely redeemable, which an available balance must reflect."},
+              {"name": "status", "type": "enum", "required": true, "values": ["OPEN", "SUSPENDED", "CLOSED"]},
+              {"name": "openedAt", "type": "timestamp", "required": true},
+              {"name": "closedAt", "type": "timestamp", "required": false}
+            ]
+          },
+          "behaviourQualifiers": [
+            {
+              "name": "Valuation History",
+              "path": "valuation-history",
+              "cardinality": "1..n",
+              "fields": [
+                {"name": "valuedAt", "type": "timestamp", "required": true},
+                {"name": "unitValueMinor", "type": "money", "required": true, "currencyField": "currency"},
+                {"name": "basis", "type": "enum", "required": true, "values": ["HISTORICAL_COST", "NAV_DECLARED", "MARK_TO_MARKET"]},
+                {"name": "sourceRef", "type": "ref", "required": false, "refDomain": "Sukuk Portfolio Management | Shariah Compliant Liquidity Management"}
+              ],
+              "note": "Append-only (ISB-IPS-02). A restated valuation is a new row; overwriting one erases the basis on which a customer was told what their holding was worth."
+            },
+            {
+              "name": "Unit Movement",
+              "path": "unit-movements",
+              "cardinality": "1..n",
+              "fields": [
+                {"name": "movementKind", "type": "enum", "required": true, "values": ["SUBSCRIPTION", "REDEMPTION", "TRANSFER_IN", "TRANSFER_OUT", "PROFIT_REINVESTMENT", "CAPITAL_LOSS_WRITE_DOWN", "CORPORATE_ACTION"]},
+                {"name": "movementUnitCount", "type": "int64", "required": true, "note": "SIGNED: negative for redemption/transfer-out/write-down"},
+                {"name": "movementUnitScaleExponent", "type": "int32", "required": true},
+                {"name": "postingRef", "type": "ref", "required": true, "refDomain": "Islamic Posting", "note": "every unit movement has a cash or allocation posting behind it — units and money never move independently"},
+                {"name": "occurredAt", "type": "timestamp", "required": true}
+              ]
+            },
+            {
+              "name": "Screening Outcome",
+              "path": "screening-outcome",
+              "cardinality": "0..1",
+              "fields": [
+                {"name": "screenedAt", "type": "timestamp", "required": true},
+                {"name": "criteriaSetRef", "type": "ref", "required": true, "refDomain": "Halal Equity Screening"},
+                {"name": "outcome", "type": "enum", "required": true, "values": ["COMPLIANT", "NON_COMPLIANT", "UNDER_REVIEW"]},
+                {"name": "nonCompliantIncomeRatio", "type": "ratio", "required": false, "note": "EXACT ratio (numerator/denominator ints) of non-compliant income to total. A float here would quietly move a holding across a threshold."},
+                {"name": "purificationCaseRef", "type": "ref", "required": false, "refDomain": "Income Purification"}
+              ]
+            },
+            {
+              "name": "Encumbrance",
+              "path": "encumbrances",
+              "cardinality": "0..n",
+              "fields": [
+                {"name": "encumbranceKind", "type": "enum", "required": true, "values": ["RAHN", "KAFALAH_SUPPORT", "REGULATORY_HOLD", "COURT_ORDER"]},
+                {"name": "encumberedAmountMinor", "type": "money", "required": true, "currencyField": "currency"},
+                {"name": "beneficiaryRef", "type": "ref", "required": false, "refDomain": "Customer Reference Data"},
+                {"name": "fromDate", "type": "date", "required": true},
+                {"name": "toDate", "type": "date", "required": false}
+              ]
+            }
+          ],
+          "rules": [
+            {"id": "ISB-IPS-01", "assert": "sum(unit-movements.movementUnitCount) == unitCount", "onViolation": "reject", "code": "POSITION_UNIT_COUNT_UNRECONCILED", "cite": ["The holding is the sum of its movements. A standalone unit count is an assertion; a reconciled one is a fact."]},
+            {"id": "ISB-IPS-02", "assert": "appendOnly(valuation-history) && appendOnly(unit-movements) && immutable(unitScaleExponent) && immutable(accountRef)", "onViolation": "reject", "code": "POSITION_HISTORY_MUTATED", "cite": ["DESIGN.md §5.8. Changing unitScaleExponent silently reinterprets every historical unitCount by a factor of ten — the unit-world equivalent of a hardcoded ×100 on money."]},
+            {"id": "ISB-IPS-03", "assert": "instrumentKind == INVESTMENT_POOL_UNIT -> ref(Islamic Account).balanceBasis == UNITISED_INVESTMENT && present(poolRef)", "onViolation": "reject", "code": "POSITION_BASIS_MISMATCH", "cite": ["A unitised holding on an account the estate publishes as a cash DEPOSIT is the exact misrepresentation this domain exists to prevent."]},
+            {"id": "ISB-IPS-04", "assert": "capitalLossBorneBy == ACCOUNT_HOLDER -> ref(Islamic Account).capitalGuaranteed == false", "onViolation": "reject", "code": "POSITION_RISK_CONTRADICTS_ACCOUNT", "cite": ["AAOIFI SS 13 (Revised) (the capital provider bears capital loss)", "AAOIFI SS 45", "DESIGN.md §7"]},
+            {"id": "ISB-IPS-05", "assert": "valuationBasis != HISTORICAL_COST -> present(valuationAt) && present(currentUnitValueMinor) && present(valuation-history.sourceRef)", "onViolation": "flag", "code": "POSITION_VALUATION_UNSOURCED", "cite": ["A NAV or a market value with no source and no timestamp cannot be disclosed to a holder as the worth of their units. 'flag' because an internally declared NAV may legitimately have no external source — which is itself worth seeing in the audit ledger."]},
+            {"id": "ISB-IPS-06", "assert": "shariahScreeningStatus == NON_COMPLIANT -> purificationRequired == true && present(purificationCaseRef)", "onViolation": "reject", "code": "POSITION_NON_COMPLIANT_WITHOUT_PURIFICATION", "cite": ["AAOIFI SS 21 (Financial Paper — Shares and Bonds) governs screening; the estate's own 'Income Purification' domain owns the computation. NOTE: SS 21's screening THRESHOLDS could not be verified against primary text by this estate's research (DECISIONS.md WAVE 3), so no threshold appears in this rule — only the consequence of an outcome a versioned criteria set produced."]},
+            {"id": "ISB-IPS-07", "assert": "unrealisedGainLossMinor != 0", "onViolation": "flag", "code": "POSITION_UNREALISED_MOVEMENT_PRESENT", "cite": ["Unrealised movement is not income and not withdrawable. The enforcing rule is ISB-IBA-06 at the balance layer; this flag makes the position-level cause visible in the same ledger.", "AAOIFI SS 13 (Revised) §8/1 (entitlement is to a share of REALISED profit)"]},
+            {"id": "ISB-IPS-08", "assert": "unitScaleExponent >= 0 && unitScaleExponent <= 9 && unit-movements.movementUnitScaleExponent == unitScaleExponent", "onViolation": "reject", "code": "POSITION_UNIT_SCALE_INVALID", "cite": ["Mixed unit scales inside one position make ISB-IPS-01's sum meaningless. One scale per position, fixed at open."]},
+            {"id": "ISB-IPS-09", "assert": "status == CLOSED -> unitCount == 0 && present(closedAt) && count(encumbrances) == 0", "onViolation": "reject", "code": "POSITION_CLOSED_WITH_HOLDINGS", "cite": ["A closed position holding units, or carrying a live rahn, is an orphaned customer entitlement."]},
+            {"id": "ISB-IPS-10", "assert": "currency == ref(Islamic Account).currency", "onViolation": "reject", "code": "POSITION_CURRENCY_MISMATCH", "cite": ["DESIGN.md §5.1 / §6 — the minor-unit exponent follows the currency; a position in a currency its account does not carry cannot be converted or summed safely."]},
+            {"id": "ISB-IPS-11", "assert": "pledgedAsCollateral == true -> count(encumbrances) >= 1 && sum(encumbrances.encumberedAmountMinor) <= carryingAmountMinor", "onViolation": "reject", "code": "POSITION_PLEDGE_UNRECORDED_OR_OVER", "cite": ["Rahn over more than the position is worth is either a modelling error or a double pledge. A pledged holding is also not freely redeemable, which the available balance must reflect."]},
+            {"id": "ISB-IPS-12", "assert": "unit-movements.movementKind == CAPITAL_LOSS_WRITE_DOWN -> ref(Islamic Account).capitalGuaranteed == false", "onViolation": "reject", "code": "POSITION_LOSS_WRITTEN_DOWN_ON_GUARANTEED_ACCOUNT", "cite": ["Writing capital loss down against a guaranteed (Qard/Wadiah) balance would pass the bank's loss to a depositor whose principal is guaranteed."]}
+          ],
+          "events": [
+            {"name": "islamic-position.opened", "topic": "isb.position.lifecycle", "payload": ["positionId", "accountRef", "instrumentKind", "unitCount", "unitScaleExponent", "unitCostMinor", "currency", "openedAt"]},
+            {"name": "islamic-position.units-moved", "topic": "isb.position.units", "payload": ["positionId", "movementKind", "movementUnitCount", "movementUnitScaleExponent", "postingRef", "occurredAt"]},
+            {"name": "islamic-position.revalued", "topic": "isb.position.valuation", "payload": ["positionId", "valuedAt", "unitValueMinor", "currency", "basis", "carryingAmountMinor", "unrealisedGainLossMinor"]},
+            {"name": "islamic-position.screening-changed", "topic": "isb.position.screening", "payload": ["positionId", "shariahScreeningStatus", "criteriaSetRef", "nonCompliantIncomeRatio", "purificationRequired", "screenedAt"]},
+            {"name": "islamic-position.closed", "topic": "isb.position.lifecycle", "payload": ["positionId", "status", "closedAt", "unitCount"]}
+          ],
+          "shariah": {
+            "contractType": "PerRecord",
+            "capitalAtRisk": true,
+            "reviewed": false,
+            "reviewNote": "UNREVIEWED — requires named Shariah board sign-off. This domain carries the claim that an IAH owns UNITS IN A POOL rather than a deposit with the bank. That claim is the foundation of every capital-at-risk statement in this fragment, and it is exactly the claim engineering cannot self-certify.",
+            "standards": [
+              {"ref": "AAOIFI SS 13 (Revised)", "title": "Mudarabah — §8/1 (share of realised profit), §9/6", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 21", "title": "Financial Paper (Shares and Bonds) — screening of equity holdings", "clauseText": false, "source": "research/agent-investigations-shariah.md", "note": "DECISIONS.md WAVE 3: the 30/30/5 screening thresholds could NOT be verified against primary text and sources disagree on the purification formula. No threshold is used here."},
+              {"ref": "AAOIFI SS 45", "title": "Protection of Capital and Investments", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "AAOIFI SS 46", "title": "Al-Wakalah Bi Al-Istithmar", "clauseText": true, "source": "research/agent-investigations-shariah.md"},
+              {"ref": "IFSB-30 (Dec 2023)", "title": "Revised Guiding Principles on Corporate Governance for IIFS — Principle 18 (IAH disclosure)", "clauseText": true, "source": "research/agent-investigations-shariah.md"}
+            ]
+          },
+          "uncertain": [
+            "AAOIFI SS 21's screening thresholds (commonly quoted as 30/30/5) could not be verified against primary text by this estate's research, and sources disagree on the purification formula. I therefore modelled NO threshold and NO formula: screening carries a versioned, SSB-approved criteria-set reference and an outcome. A generator default here would be manufacturing authority.",
+            "Unit accounting at a declared integer scale is my invention for keeping floats out. It is correct arithmetic but I do not know whether it matches how Islamic banks actually express fractional IAH units, or whether a ratio pair would be the better representation for a unitised holding. A reviewer should check this against a real IAH product before it is generated.",
+            "Whether an IAH position should be published to TPPs at all is an open product/privacy question. I mapped the whole domain to the sibling surface, but a holdings list is materially more sensitive than a balance, and AIS v4.0.1 has no holdings resource to normalise it against.",
+            "IJARA_ASSET_INTEREST is in instrumentKind because a lessee's interest in a leased asset is a real position, but I modelled no asset-specific field (residual value, transfer-of-ownership schedule for IMB). That belongs to the Ijara Muntahia Bittamleek product domain, and I may have the boundary in the wrong place.",
+            "Corporate actions on sukuk (early call, restructuring, default/sukuk-holder recourse to the underlying asset) are folded into one CORPORATE_ACTION movement kind. Sukuk default and recourse are a serious modelling area I did not attempt.",
+            "I did not model the relationship between a position's valuation and the Balance domain's at-risk split — i.e. whether atRiskAmountMinor must equal the sum of position carrying amounts. It probably must, and a cross-domain rule would be the right place to say so, but the assert grammar has no cross-domain aggregate and I did not invent one."
+          ],
+          "openBankingMapping": {
+            "obieSurface": "NONE. AIS v4.0.1 has no holdings, units, NAV or encumbrance resource of any kind.",
+            "fields": [
+              {"field": "the ENTIRE control record", "verdict": "NOT_REPRESENTABLE_SIBLING", "sibling": "islamic-account-info.Positions[] (or its own sibling sub-resource under /islamic-banking/v1/aisp/accounts/{AccountId})", "note": "This is the cleanest finding in the mapping: there is nothing to map. Every other domain in this fragment has a partial OBIE home; this one has none. It is therefore the clearest justification for DESIGN.md §7 RULE 3's sibling server — a unitised Mudarabah holding is simply not an Open Banking AIS resource."},
+              {"field": "accountRef", "verdict": "REPRESENTABLE_UNCHANGED", "obie": "the AccountId path parameter", "note": "the only thing about a position that OBIE can express is which account it belongs to"},
+              {"field": "carryingAmountMinor", "verdict": "REPRESENTABLE_WITH_LOSS", "obie": "OBReadBalance1 … Type INFO", "note": "A position's carrying value COULD be published as an INFO balance. I do NOT recommend it: an unlabelled informational number next to a CLAV balance invites a TPP to add them together."}
+            ]
+          }
+        }
+      ]
+    }
+  ],
+
+  "areaWideGaps": [
+    "THE PREREQUISITE IS STILL A PREREQUISITE. These five entries make an Open Banking surface POSSIBLE; they do not make it honest on their own. The sibling surface's ContractType, ProfitSharingRatio, PER/IRR and SSB provenance are all REFERENCES into the 48 product and governance domains, which are still byte-identical scaffolds with additionalProperties:true over a ConcurrentHashMap. Until at least the six cores named in DECISIONS.md WAVE 3 (isb-mudarabah-savings-account, isb-mudarabah-term-investment-account, isb-wakala-investment-account, isb-profit-calculation-and-distribution, isb-murabaha-financing, isb-ijara-leasing) carry real control records, openbank-islamic serves REAL account identity, postings and balances with EMPTY contract semantics. That is a better failure than today's (nothing to serve at all) but it is not a working surface.",
+    "A SHARIAH BLOCK HAS NO CONFORMANT ERROR CODE, AND THIS FRAGMENT DOES NOT FIX IT. OBError1.ErrorCode is minLength 4 / maxLength 4 drawn from OBExternalStatusReason1Code, which has no permissibility value (DECISIONS.md WAVE 1). ISB-IPO-08 records a BLOCK outcome in the ledger; it cannot express one in a conformant UK error body. The three options (reuse U014 FailsControlParameters and lie slightly, use a vendor namespace and break the 4-char constraint, or return the block only on the sibling surface) are an OPEN OWNER DECISION. My recommendation, not applied: express it ONLY on the sibling, whose error envelope is ours to define, and never on an OBIE path.",
+    "FAIL-OPEN VS FAIL-CLOSED ON AN UNSCREENABLE MOVEMENT IS UNDECIDED. ISB-IPO-13 deliberately flags rather than rejects, so the estate's honest state (most postings are NOT_SCREENED) is visible instead of silently defaulted. It does not decide the policy, because the research is explicit that the gate's only inputs — a conditional ISO 20022 Purpose code and a conditional ISO 18245 MCC — are unreliable, and 'REFER every payment' makes the demo unusable.",
+    "DESIGN.md §7's ContractType ENUM IS USABLE HERE BUT NOT COMPLETE, and I did not extend it. All ten values are used; what they cannot express is (a) Wadiah yad amanah vs yad dhamanah, which are different guarantee regimes under one value, and (b) Musharakah and Diminishing Musharakah, which the estate HAS as product domains ('Musharakah Partnership Financing', 'Diminishing Musharakah Home Finance') and which §7's list omits entirely. A Musharakah account therefore cannot be published with a truthful ContractType today. The sibling fragment isb-operations raises the same class of problem for Takaful/Retakaful/Ujrah/Tawarruq. Raised per §7's instruction, not silently diverged from.",
+    "THE AAOIFI FINANCIAL ACCOUNTING STANDARDS WERE NEVER OBTAINED by this estate's research — only the Shariah Standards (SS) were, and the IFSB standards partly. Everything in this fragment about how profit, PER/IRR, purification and unrealised movement are PRESENTED (the statement's money fields, the balance components, the withdrawable flag) is therefore a presentation choice no clause backs. This is the largest single gap in the slice and it is an obtainable one: the documents exist, nobody here has read them.",
+    "MONEY CROSSES THE BOUNDARY IN ONE DIRECTION TODAY AND TWO TOMORROW. The read path (Java int64 minor → Go decimal string → OBIE) is specified in moneyBoundary. The WRITE path (a TPP-initiated payment landing as an Islamic Posting) inverts it, and the inverse conversion is where the 13-digit ceiling and the rounding policy actually bite. DESIGN.md §6 requires one function pair with property tests; nothing in this fragment can enforce that, and no rule here will catch a Go-side conversion bug. BHD (exponent 3) must be the first test case, not JPY and not GBP.",
+    "FIVE DOMAINS IS THE MINIMUM, NOT THE SET. Two further servicing domains are arguably missing and I did not invent them, because the brief named five and because inventing more taxonomy is cheap while modelling it honestly is not: (a) an Islamic Standing Order / Scheduled Payment domain — OBIE AIS has /standing-orders, /direct-debits and /scheduled-payments endpoints that this estate can currently serve with NOTHING, and a direct debit over a capital-at-risk account raises its own questions; (b) an Islamic Beneficiary domain, for the same reason (/beneficiaries). DECISIONS.md WAVE 1 already names this as an estate-wide gap. They are the 50th and 51st catalog entries, and on this fragment's placement they belong in 'Islamic Account Servicing' at a cost of one entry each."
+  ]
+}

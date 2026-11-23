@@ -12,7 +12,32 @@ BIAN Service Domain microservice — part of the [islamic-platform](../../islami
 | **K8s Namespace** | `__NAMESPACE__` |
 | **Stack** | Java 21 · Spring Boot 3 · Resilience4j · Cilium mesh |
 
-> ⚠️ **Phase 1 (shallow):** real REST API over an in-memory store. Phase 2 replaces the store with per-domain persistence and real domain logic. This repo was stamped from `islamic-platform/generator` — regenerate rather than hand-editing boilerplate.
+> ⚠️ **GENERATED. Do not hand-edit.** Every file here was stamped from
+> `islamic-banking-platform/generator` out of this service domain's entry in
+> `catalog/islamic-service-landscape.json`. Change the catalog entry and
+> re-run the generator; a hand edit is reverted by the next `--force` stamp.
+>
+> **UNREVIEWED — requires named Shariah board sign-off.** Every Shariah-bearing
+> field, rule and standard reference was modelled by an engineer from a research
+> record and reviewed by no Shariah supervisory board. See
+> [`docs/SHARIAH-GAPS.md`](docs/SHARIAH-GAPS.md).
+>
+> **An extension beyond the UK Open Banking Standard**, not part of it: no
+> conformance or certification claim attaches to this surface.
+>
+> **Single-tenant** — there is no `tenant_id` column in this estate — and
+> `replicaCount: 1` is load-bearing for money correctness until DB-level
+> locking lands in the debit path. Stated rather than faked.
+>
+> **Money is a signed `int64` count of ISO 4217 MINOR units** everywhere: no
+> float, no double, no decimal column. The exponent comes from the generated
+> `money/Iso4217` table — BHD/KWD/OMR/TND are 3-decimal and JPY is 0-decimal,
+> so a hardcoded ×100 is a bug. A profit-sharing ratio is an exact
+> numerator/denominator pair of `int64`s, never a float.
+>
+> **Rule coverage is partial and listed**: see
+> [`docs/RULES-GAPS.md`](docs/RULES-GAPS.md) for every catalog rule this
+> service does *not* enforce, and why.
 
 ## BIAN Semantic API
 

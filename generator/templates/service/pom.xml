@@ -21,6 +21,11 @@
     <java.version>21</java.version>
     <springdoc.version>2.6.0</springdoc.version>
     <resilience4j.version>2.2.0</resilience4j.version>
+    <openapi-generator.version>7.27.0</openapi-generator.version>
+    <!-- The generated sources are never committed: they are derived from
+         api/openapi.yaml on every build, which is what makes contract drift a
+         compile error rather than a review comment. -->
+    <openapi.output>${project.build.directory}/generated-sources/openapi</openapi.output>
   </properties>
 
   <dependencies>
@@ -55,15 +60,115 @@
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-registry-prometheus</artifactId>
     </dependency>
+
+    <!-- Persistence. The Phase-1 ConcurrentHashMap store is gone: the generated
+         repository is JdbcTemplate over the generated Flyway schema, and money
+         is a signed BIGINT of ISO 4217 minor units. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- This service VALIDATES tokens; it never issues them. PAR, PKCE, client
+         authentication, DPoP and JWKS rotation belong to the platform
+         authorization server (DESIGN.md section 3). -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+    </dependency>
+
+    <!-- Bean validation annotations on the GENERATED models. -->
+    <dependency>
+      <groupId>jakarta.annotation</groupId>
+      <artifactId>jakarta.annotation-api</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
 
   <build>
     <plugins>
+      <!-- THE CONTRACT IS COMPILED AGAINST (Wave-2 manifest tier1 item 2).
+           `validate` rejects a malformed contract; `generate` derives the model
+           and API interfaces into target/, and the generated controller declares
+           `implements ControlRecordApi, ServiceDomainApi`. A path, parameter,
+           status code or response type that stops matching api/openapi.yaml
+           stops compiling. CHECK: javac. -->
+      <plugin>
+        <groupId>org.openapitools</groupId>
+        <artifactId>openapi-generator-maven-plugin</artifactId>
+        <version>${openapi-generator.version}</version>
+        <executions>
+          <execution>
+            <id>validate-contract</id>
+            <phase>generate-sources</phase>
+            <goals><goal>validate</goal></goals>
+            <configuration>
+              <inputSpec>${project.basedir}/api/openapi.yaml</inputSpec>
+            </configuration>
+          </execution>
+          <execution>
+            <id>generate-api</id>
+            <phase>generate-sources</phase>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <inputSpec>${project.basedir}/api/openapi.yaml</inputSpec>
+              <generatorName>spring</generatorName>
+              <library>spring-boot</library>
+              <output>${openapi.output}</output>
+              <apiPackage>__API_PKG__</apiPackage>
+              <modelPackage>__MODEL_PKG__</modelPackage>
+              <generateApiTests>false</generateApiTests>
+              <generateModelTests>false</generateModelTests>
+              <generateApiDocumentation>false</generateApiDocumentation>
+              <generateModelDocumentation>false</generateModelDocumentation>
+              <generateSupportingFiles>false</generateSupportingFiles>
+              <configOptions>
+                <interfaceOnly>true</interfaceOnly>
+                <skipDefaultInterface>true</skipDefaultInterface>
+                <useSpringBoot3>true</useSpringBoot3>
+                <useJakartaEe>true</useJakartaEe>
+                <useTags>true</useTags>
+                <performBeanValidation>true</performBeanValidation>
+                <documentationProvider>none</documentationProvider>
+                <annotationLibrary>none</annotationLibrary>
+                <openApiNullable>false</openApiNullable>
+                <dateLibrary>java8</dateLibrary>
+                <useOptional>false</useOptional>
+                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                <sourceFolder>src/main/java</sourceFolder>
+              </configOptions>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>

@@ -1,0 +1,15 @@
+{
+  "fragments": {
+    "isb-deposits.json": 9,
+    "isb-financing.json": 12,
+    "isb-governance.json": 8,
+    "isb-missing-cores.json": 5,
+    "isb-operations.json": 12,
+    "isb-treasury.json": 7
+  },
+  "unparseable": [],
+  "enrichedDomains": 53,
+  "catalogDomainsWithoutFragment": [],
+  "fragmentDomainsNotInCatalog": [],
+  "normalisationErrors": []
+}

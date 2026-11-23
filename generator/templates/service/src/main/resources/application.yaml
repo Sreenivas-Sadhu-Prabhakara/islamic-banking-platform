@@ -2,6 +2,30 @@ spring:
   application:
     name: __ARTIFACT_ID__
 
+  # FAIL FAST ON CONFIG (DESIGN.md section 5.4). A missing DSN must NOT silently
+  # downgrade to an in-memory store seeded with fake data: there is no in-memory
+  # fallback in this service at all, so an absent DATABASE_URL fails startup.
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USER:}
+    password: ${DATABASE_PASSWORD:}
+
+  flyway:
+    enabled: true
+    # Classpath location so the migration ships inside the jar and runs in the
+    # container. The generator writes it to src/main/resources/db/migration/.
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Validated against the platform authorization server's JWKS. Resolved
+          # lazily, so no network call happens at startup or in tests.
+          jwk-set-uri: ${OAUTH_JWKS_URI:http://localhost:8081/realms/openbank/protocol/openid-connect/certs}
+          issuer-uri: ${OAUTH_ISSUER_URI:http://localhost:8081/realms/openbank}
+
 server:
   port: 8080
   shutdown: graceful
@@ -21,6 +45,7 @@ management:
 
 info:
   isb:
+    shariahReviewed: false   # always. No Shariah board has reviewed this service.
     serviceDomain: "__SD_NAME__"
     businessArea: "__BUSINESS_AREA__"
     businessDomain: "__BUSINESS_DOMAIN__"

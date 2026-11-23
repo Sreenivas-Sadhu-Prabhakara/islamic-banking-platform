@@ -1,0 +1,1255 @@
+{
+  "fragmentVersion": "1.0.0",
+  "fragmentOf": "catalog/islamic-service-landscape.json",
+  "businessArea": "Shariah Governance and Compliance",
+  "namespace": "isb-governance",
+  "phase": "P4 — DESIGN ONLY. The generator has NOT been run; nothing under islamic-banking-services was touched.",
+  "note": "Per DESIGN.md §8 this fragment is DATA. The 8 service domains below carry no hand-written service code: one template upgrade turns each entry into api/openapi.yaml, a Flyway migration, a repository, a rules component with generated tests, api/events.yaml and authorization deny-tests. The 9th governance domain must cost one entry in this file.",
+
+  "conventions": {
+    "money": "Every field of type 'money' generates THREE columns — <name>_minor BIGINT NOT NULL (signed), <name>_currency CHAR(3) NOT NULL (ISO 4217 alpha), <name>_exponent SMALLINT NOT NULL — and an OpenAPI object {amountMinor:int64, currency:^[A-Z]{3}$, exponent:int32}. The exponent comes from ONE shared ISO 4217 table in the generated parent (BHD/KWD/OMR/TND = 3, JPY = 0, USD/EUR = 2). A hardcoded x100 is a bug. No float, no double, no BigDecimal-from-string anywhere in a money path.",
+    "ratio": "Every field of type 'ratio' generates TWO columns — <name>_num BIGINT NOT NULL, <name>_den BIGINT NOT NULL CHECK (<name>_den > 0) — and an OpenAPI object {numerator:int64, denominator:int64}. A ratio is never rendered as a decimal on the wire. Arithmetic is integer multiply-then-divide with the record's recorded roundingPolicy; comparison and summation of ratios use a common denominator, never a quotient.",
+    "typeVocabulary": ["string", "text", "bool", "int32", "int64", "uuid", "date", "timestamp", "enum", "money", "ratio", "digest", "uri", "iso3166Alpha2", "iso4217"],
+    "typeMapping": {
+      "string": "VARCHAR(200) / type: string maxLength 200",
+      "text": "TEXT / type: string",
+      "bool": "BOOLEAN / type: boolean",
+      "int32": "INTEGER / type: integer format: int32",
+      "int64": "BIGINT / type: integer format: int64",
+      "uuid": "UUID / type: string format: uuid",
+      "date": "DATE / type: string format: date",
+      "timestamp": "TIMESTAMPTZ / type: string format: date-time",
+      "enum": "TEXT + CHECK (col IN (...)) / type: string enum: [...]",
+      "digest": "CHAR(64) + CHECK (col ~ '^[0-9a-f]{64}$') / type: string pattern ^[0-9a-f]{64}$ — SHA-256 hex",
+      "uri": "TEXT / type: string format: uri",
+      "iso3166Alpha2": "CHAR(2) / type: string pattern ^[A-Z]{2}$",
+      "iso4217": "CHAR(3) / type: string pattern ^[A-Z]{3}$"
+    },
+    "controlRecordShape": "controlRecord.fields is the ONLY place a field is defined. controlRecord.identifiers names which of those fields are identifiers and of what kind. controlRecord.money names which are money. controlRecord.ratios names which are ratios and their integer constraint. No field is defined twice.",
+    "identifierKinds": ["primary", "foreign", "natural", "correlation"],
+    "behaviourQualifier": "Each BQ generates a child table (<cr_table>_<bq_slug>, FK to the control record, ON DELETE RESTRICT because §5.8 is append-only), a sub-resource /v1/{crSlug}/{crId}/{bqSlug}, and one operation per actionTerm. cardinality 'one' generates a singleton sub-resource (UNIQUE on the FK); 'many' generates a collection.",
+    "actionTerms": ["Initiate", "Register", "Record", "Update", "Retrieve", "Evaluate", "Execute", "Capture", "Control", "Request", "Notify", "Terminate"],
+    "ruleExpressionLanguage": "A restricted, generable subset. Terms: field paths (cr.field, bq.Name[].field), literals, money/ratio accessors (.minor, .currency, .num, .den). Operators: == != < <= > >= && || ! implies, in / not in, is null / is not null. Functions: sum(path), count(path), exists(path where expr), round(expr, policy), effectiveAt(ref, date), status(ref). Nothing else — an assertion that needs more than this is not in the catalog, it is in notDerivable.",
+    "onViolation": "reject = HTTP 422 with a generated problem+json carrying the rule id, and NO state change. flag = the write succeeds and an append-only finding row plus the rule's event are emitted. Exactly these two values, per DESIGN.md §8.",
+    "ruleScope": "scope 'local' is decidable from this service's own rows and generates a real assertion. scope 'cross-domain' needs another service's state: the template generates a PolicyPort interface, a generated client from the named dependency's contract, a deny-by-default stub, and a contract test — and until the port is wired the rule DEGRADES TO flag and the degradation is itself recorded on the record (policyPortWired=false). A cross-domain rule silently passing is the failure mode this names.",
+    "testVectors": "Optional per rule. Each vector is {name, given, expect} and generates one JUnit parameterised case. Money and ratio rules carry a 3-decimal (BHD/KWD/OMR/TND), a 0-decimal (JPY) and a 2-decimal (USD) vector, because that is where an exponent bug hides.",
+    "appendOnly": "Every domain in this area is governance evidence. The generated repository exposes no DELETE and no in-place UPDATE of a decided/issued/computed row; a correction is a new row that supersedes the old one. DESIGN.md §5.8.",
+    "shariahReviewed": "Every 'shariah' block in this fragment carries reviewed:false and the literal string 'UNREVIEWED — requires named Shariah board sign-off'. The generator stamps that string into the OpenAPI description of every Shariah-bearing schema and into the repo README. It is removed only by a named SSB, never by a developer."
+  },
+
+  "notDerivable": [
+    "Hijri/Gregorian calendar conversion. The catalog records calendarBasis, hawlStartsOn, hawlEndsOn and hawlDays as data; converting between calendars (and the 354-vs-355-day lunar year) is a library dependency, not a generated artifact. The generator must NOT emit arithmetic that assumes a fixed lunar year length.",
+    "Metal spot prices, index constituents and issuer revenue disclosures. These are external feeds. The catalog records the value with its source and asOf; it never generates a fetcher and never defaults a price.",
+    "The ISO 4217 exponent table and the money conversion function. ONE shared implementation in the generated parent (DESIGN.md §6), not 8 copies.",
+    "Any authoritative cross-domain join (was this SSB mandate ACTIVE on the fatwa's issuance date; is this ruling ISSUED and effective over this period). Generable only as a PolicyPort + generated client + deny-by-default stub; see conventions.ruleScope.",
+    "Free-text Shariah reasoning (decisionBasis, scope, customerVisibleReason, managementResponse). Stored and digested, never validated or inferred by generated code.",
+    "The choice of rounding policy, zakat base method, purification formula, nisab metal and mass, and whether an administrative (Amilin) deduction is permitted. Each is a required recorded field with a ruling reference and NO default. A default here would be a compliance claim the code cannot back.",
+    "Beneficiary (asnaf) eligibility determination, SNC classification, and whether a contract is void. The generated code records, quarantines and routes; it never decides.",
+    "A 'halal', 'compliant' or 'shariahApproved' boolean. No domain in this fragment has one, by design. The strongest statement the estate may make is: this decision applied criterion <id> of policy <id> version <n>, approved by ruling <id>, with evidenceQuality <q>."
+  ],
+
+  "businessDomains": [
+    {
+      "name": "Shariah Governance",
+      "serviceDomains": [
+
+        {
+          "name": "Shariah Supervisory Board Directory",
+          "functionalPattern": "Catalog",
+          "assetType": "SSB Member Mandate",
+          "controlRecord": {
+            "name": "SSB Member Mandate Directory Entry",
+            "table": "ssb_member_mandate_directory_entry",
+            "fields": [
+              {"name": "mandateId", "type": "uuid", "required": true, "description": "Primary key of the mandate."},
+              {"name": "boardId", "type": "string", "required": true, "description": "The governance organ this mandate sits on."},
+              {"name": "boardName", "type": "string", "required": true},
+              {"name": "organUnit", "type": "enum", "required": true, "values": ["SSB", "SHARIAH_COMPLIANCE_FUNCTION", "INTERNAL_SHARIAH_AUDIT", "EXTERNAL_SHARIAH_AUDIT", "CENTRAL_SHARIAH_BOARD"], "description": "The five organs AAOIFI GS 1 (Revised 2024) with GS 8 / GS 9 / GS 11 distinguishes. A fatwa reference and an audit trail attach to one of these, never to 'the bank'."},
+              {"name": "institutionLei", "type": "string", "required": false, "description": "LEI of the institution the mandate is held at. Needed to make concurrent-mandate disclosure meaningful."},
+              {"name": "isFinanceWindow", "type": "bool", "required": true, "description": "The institution is an Islamic finance window of a conventional bank — AAOIFI GS 23 (issued Jan 2026) applies different governance expectations."},
+              {"name": "memberPartyId", "type": "string", "required": true},
+              {"name": "memberName", "type": "string", "required": true},
+              {"name": "role", "type": "enum", "required": true, "values": ["CHAIR", "DEPUTY_CHAIR", "MEMBER", "EXECUTIVE_MEMBER", "SECRETARY"]},
+              {"name": "appointmentAuthority", "type": "enum", "required": true, "values": ["BOARD_OF_DIRECTORS", "SHAREHOLDERS_GENERAL_ASSEMBLY", "CENTRAL_SHARIAH_BOARD", "REGULATOR"], "description": "AAOIFI GS 19 governs appointment and composition; which organ appoints is jurisdictional, so it is recorded, not assumed."},
+              {"name": "appointmentReference", "type": "string", "required": true},
+              {"name": "appointedOn", "type": "date", "required": true},
+              {"name": "termStartsOn", "type": "date", "required": true},
+              {"name": "termEndsOn", "type": "date", "required": true},
+              {"name": "regulatorApprovalRequired", "type": "bool", "required": true, "description": "Per-jurisdiction. Recorded on the mandate because the directory is the only place that knows the institution's jurisdiction."},
+              {"name": "regulatorApprovalReference", "type": "string", "required": false},
+              {"name": "jurisdiction", "type": "iso3166Alpha2", "required": true},
+              {"name": "status", "type": "enum", "required": true, "values": ["NOMINATED", "ACTIVE", "SUSPENDED", "TERMINATED", "EXPIRED"]},
+              {"name": "statusChangedAt", "type": "timestamp", "required": true},
+              {"name": "terminationReason", "type": "text", "required": false},
+              {"name": "supersedesMandateId", "type": "uuid", "required": false, "description": "Renewal chain. A renewed term is a NEW mandate row, never an edit of termEndsOn — the directory has to be able to answer 'was this person a member on date D'."},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "policyPortWired", "type": "bool", "required": true, "description": "False means every cross-domain rule on this record degraded to flag. See conventions.ruleScope."}
+            ],
+            "identifiers": [
+              {"field": "mandateId", "kind": "primary"},
+              {"field": "boardId", "kind": "natural"},
+              {"field": "memberPartyId", "kind": "foreign", "target": "isb-customer-reference-data"},
+              {"field": "supersedesMandateId", "kind": "foreign", "target": "self"},
+              {"field": "appointmentReference", "kind": "natural"}
+            ],
+            "money": [],
+            "ratios": []
+          },
+          "behaviourQualifiers": [
+            {"name": "Member Qualification", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Update"], "fields": [
+              {"name": "qualificationCode", "type": "string", "required": true},
+              {"name": "qualificationTitle", "type": "string", "required": true},
+              {"name": "issuingBody", "type": "string", "required": true},
+              {"name": "issuedOn", "type": "date", "required": false},
+              {"name": "evidenceRef", "type": "uri", "required": false},
+              {"name": "evidenceDigest", "type": "digest", "required": false}
+            ]},
+            {"name": "Mandate Term", "cardinality": "many", "actionTerms": ["Register", "Retrieve"], "fields": [
+              {"name": "termNumber", "type": "int32", "required": true},
+              {"name": "startsOn", "type": "date", "required": true},
+              {"name": "endsOn", "type": "date", "required": true},
+              {"name": "renewalReference", "type": "string", "required": false},
+              {"name": "renewedByAuthority", "type": "enum", "required": true, "values": ["BOARD_OF_DIRECTORS", "SHAREHOLDERS_GENERAL_ASSEMBLY", "CENTRAL_SHARIAH_BOARD", "REGULATOR"]}
+            ]},
+            {"name": "Independence Assessment", "cardinality": "many", "actionTerms": ["Record", "Retrieve", "Evaluate"], "fields": [
+              {"name": "assessedOn", "type": "date", "required": true},
+              {"name": "assessedByOrgan", "type": "enum", "required": true, "values": ["BOARD_OF_DIRECTORS", "GOVERNANCE_COMMITTEE", "REGULATOR", "EXTERNAL_REVIEWER"]},
+              {"name": "conflictDeclared", "type": "bool", "required": true},
+              {"name": "conflictDescription", "type": "text", "required": false},
+              {"name": "outcome", "type": "enum", "required": true, "values": ["INDEPENDENT", "INDEPENDENT_WITH_MITIGATION", "NOT_INDEPENDENT", "UNDETERMINED"]},
+              {"name": "mitigationDescription", "type": "text", "required": false}
+            ]},
+            {"name": "Concurrent Mandate", "cardinality": "many", "actionTerms": ["Register", "Retrieve"], "fields": [
+              {"name": "otherInstitutionName", "type": "string", "required": true},
+              {"name": "otherInstitutionLei", "type": "string", "required": false},
+              {"name": "otherInstitutionJurisdiction", "type": "iso3166Alpha2", "required": false},
+              {"name": "otherRole", "type": "enum", "required": true, "values": ["CHAIR", "DEPUTY_CHAIR", "MEMBER", "EXECUTIVE_MEMBER", "SECRETARY"]},
+              {"name": "disclosedOn", "type": "date", "required": true},
+              {"name": "isCompetingInstitution", "type": "bool", "required": true}
+            ]},
+            {"name": "Delegated Authority", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Terminate"], "fields": [
+              {"name": "authorityCode", "type": "string", "required": true},
+              {"name": "scopeDescription", "type": "text", "required": true},
+              {"name": "mayActAlone", "type": "bool", "required": true, "description": "AAOIFI GS 18 governs the Shariah decision-making process; whether one member may rule alone is a recorded delegation, never an implicit default."},
+              {"name": "grantedByRulingId", "type": "uuid", "required": true},
+              {"name": "effectiveFrom", "type": "date", "required": true},
+              {"name": "effectiveTo", "type": "date", "required": false}
+            ]},
+            {"name": "Board Composition Policy", "cardinality": "one", "actionTerms": ["Register", "Retrieve", "Update"], "fields": [
+              {"name": "jurisdiction", "type": "iso3166Alpha2", "required": true},
+              {"name": "minimumMemberCount", "type": "int32", "required": true, "description": "A per-jurisdiction PARAMETER, not a constant. The commonly quoted minimum of three was not confirmed from a primary AAOIFI GS 19 text in the research behind this design — see uncertain."},
+              {"name": "maximumConcurrentMandates", "type": "int32", "required": false},
+              {"name": "competingInstitutionMandatePermitted", "type": "bool", "required": true},
+              {"name": "sourceAuthority", "type": "string", "required": true},
+              {"name": "sourceReference", "type": "string", "required": true},
+              {"name": "effectiveFrom", "type": "date", "required": true}
+            ]}
+          ],
+          "rules": [
+            {"id": "ISB-GOV-SSB-01", "scope": "local", "assert": "cr.termEndsOn > cr.termStartsOn && cr.termStartsOn >= cr.appointedOn", "onViolation": "reject", "rationale": "An out-of-order term makes 'was this member active on date D' unanswerable, which is the directory's only job."},
+            {"id": "ISB-GOV-SSB-02", "scope": "local", "assert": "cr.status == 'ACTIVE' implies (cr.statusChangedAt >= cr.termStartsOn && cr.statusChangedAt <= cr.termEndsOn)", "onViolation": "reject", "rationale": "A mandate cannot be ACTIVE outside its own term."},
+            {"id": "ISB-GOV-SSB-03", "scope": "local", "assert": "(cr.status == 'ACTIVE' && cr.regulatorApprovalRequired) implies cr.regulatorApprovalReference is not null", "onViolation": "reject", "rationale": "Where the jurisdiction requires regulator approval of an SSB appointment, an ACTIVE mandate without the reference is an unevidenced claim."},
+            {"id": "ISB-GOV-SSB-04", "scope": "local", "assert": "count(BoardCompositionPolicy) == 1 && count(MandateTerm where endsOn > startsOn) == count(MandateTerm)", "onViolation": "reject", "rationale": "Every mandate is evaluated against exactly one recorded composition policy; term rows obey the same ordering as the control record."},
+            {"id": "ISB-GOV-SSB-05", "scope": "cross-domain", "dependsOn": ["isb-shariah-supervisory-board-directory"], "assert": "count(mandate where boardId == cr.boardId && status == 'ACTIVE') >= BoardCompositionPolicy.minimumMemberCount", "onViolation": "flag", "rationale": "Quorum/composition is jurisdictional and the count spans rows, not one record. Flag, never reject — refusing a termination because it breaks quorum would make an unlawful board unfixable.", "emits": "ssb.board.composition.below.policy"},
+            {"id": "ISB-GOV-SSB-06", "scope": "local", "assert": "(BoardCompositionPolicy.competingInstitutionMandatePermitted == false) implies count(ConcurrentMandate where isCompetingInstitution == true) == 0", "onViolation": "flag", "rationale": "Cross-membership at a competing institution is restricted in some jurisdictions and disclosed in others. Flagged and recorded; the determination is the regulator's."},
+            {"id": "ISB-GOV-SSB-07", "scope": "local", "assert": "(BoardCompositionPolicy.maximumConcurrentMandates is not null) implies count(ConcurrentMandate) <= BoardCompositionPolicy.maximumConcurrentMandates", "onViolation": "flag"},
+            {"id": "ISB-GOV-SSB-08", "scope": "local", "assert": "cr.status in ['TERMINATED','EXPIRED'] implies cr.terminationReason is not null", "onViolation": "reject"},
+            {"id": "ISB-GOV-SSB-09", "scope": "local", "assert": "cr.supersedesMandateId is null || status(cr.supersedesMandateId) in ['TERMINATED','EXPIRED']", "onViolation": "reject", "rationale": "A renewal is a new row; the superseded row must already be closed, so two ACTIVE mandates can never overlap for the same seat."},
+            {"id": "ISB-GOV-SSB-10", "scope": "local", "assert": "no in-place update of mandateId, memberPartyId, boardId, termStartsOn, termEndsOn or appointmentReference once cr.status != 'NOMINATED'", "onViolation": "reject", "rationale": "DESIGN.md §5.8. The directory is the evidence a fatwa's signatory was authorised; rewriting it destroys that evidence."}
+          ],
+          "events": [
+            {"name": "ssb.mandate.registered", "payload": "mandateId, boardId, organUnit, memberPartyId, role, termStartsOn, termEndsOn, jurisdiction"},
+            {"name": "ssb.mandate.activated", "payload": "mandateId, boardId, activatedAt, regulatorApprovalReference"},
+            {"name": "ssb.mandate.suspended", "payload": "mandateId, boardId, suspendedAt, reason"},
+            {"name": "ssb.mandate.terminated", "payload": "mandateId, boardId, terminatedAt, terminationReason, supersededByMandateId"},
+            {"name": "ssb.board.composition.below.policy", "payload": "boardId, activeMemberCount, minimumMemberCount, policySourceReference, observedAt"},
+            {"name": "ssb.independence.concern.recorded", "payload": "mandateId, assessedOn, outcome, conflictDeclared"},
+            {"name": "ssb.delegated.authority.granted", "payload": "mandateId, authorityCode, mayActAlone, grantedByRulingId, effectiveFrom"}
+          ],
+          "shariah": {
+            "contractType": null,
+            "contractTypeNote": "Not a Shariah contract. This is the governance organ register that every other domain's fatwa reference and audit trail points at.",
+            "capitalAtRisk": false,
+            "reviewed": false,
+            "reviewStatus": "UNREVIEWED — requires named Shariah board sign-off",
+            "standards": [
+              {"body": "AAOIFI", "code": "GS 1 (Revised 2024)", "title": "Shari'ah Governance Framework", "note": "Approved at AGEB's 37th meeting, announced 29 Dec 2024 (PR/028/2024)."},
+              {"body": "AAOIFI", "code": "GS 19", "title": "SSB Appointment and Composition", "note": "Issued with GS 1 Rev 2024. Governs this record. The specific minimum member count was NOT read from the primary text — see uncertain."},
+              {"body": "AAOIFI", "code": "GS 20", "title": "SSB Functions and Operations"},
+              {"body": "AAOIFI", "code": "GS 21", "title": "SSB Review and Report"},
+              {"body": "AAOIFI", "code": "GS 22", "title": "Islamic Finance Subsidiaries / Associates"},
+              {"body": "AAOIFI", "code": "GS 23", "title": "Application of Shari'ah Governance Principles to Islamic Finance Windows", "note": "Issued Jan 2026. Basis for the isFinanceWindow field."},
+              {"body": "AAOIFI", "code": "GS 8", "title": "Central Shari'ah Board", "note": "Basis for the CENTRAL_SHARIAH_BOARD organ value."},
+              {"body": "AAOIFI", "code": "GS 9", "title": "Shari'ah Compliance Function"},
+              {"body": "AAOIFI", "code": "GS 11", "title": "Internal Shari'ah Audit"},
+              {"body": "AAOIFI", "code": "GS 18", "title": "Shari'ah Decision-Making Process", "note": "Basis for the Delegated Authority BQ."},
+              {"body": "IFSB", "code": "IFSB-30", "title": "Revised Guiding Principles on Corporate Governance for IIFS (Banking Segment)", "note": "Adopted Dec 2023; effective in each jurisdiction from 1 Jan 2025."},
+              {"body": "IFSB", "code": "IFSB-31", "title": "Guiding Principles for Effective Supervision of Shariah Governance", "note": "Adopted Jul 2025, 15 principles."}
+            ]
+          },
+          "uncertain": [
+            "Minimum SSB size. Modelled as BoardCompositionPolicy.minimumMemberCount, a sourced per-jurisdiction parameter, precisely because the research behind this design did not obtain the primary AAOIFI GS 19 text. The frequently quoted figure of three members comes from secondary sources and is NOT asserted anywhere in this entry.",
+            "Whether a member of the internal Shariah audit organ may concurrently hold an SSB mandate. Jurisdictional; recorded via organUnit plus Independence Assessment and flagged in the audit domain, never rejected here.",
+            "Cross-membership caps and the definition of a 'competing institution'. Recorded as policy parameters with a named source; the catalog supplies no default.",
+            "AAOIFI's governance numbering changed recently and secondary sources are stale (GS 6 is the superseded 2005 statement, not the Shariah compliance function). Every code above should be re-verified against aaoifi.com before it reaches a published contract."
+          ]
+        },
+
+        {
+          "name": "Fatwa And Ruling Repository",
+          "functionalPattern": "Catalog",
+          "assetType": "Shariah Ruling",
+          "controlRecord": {
+            "name": "Shariah Ruling Directory Entry",
+            "table": "shariah_ruling_directory_entry",
+            "fields": [
+              {"name": "rulingId", "type": "uuid", "required": true},
+              {"name": "boardId", "type": "string", "required": true},
+              {"name": "issuingOrgan", "type": "enum", "required": true, "values": ["SSB", "CENTRAL_SHARIAH_BOARD", "SHARIAH_COMPLIANCE_FUNCTION", "REGULATOR"]},
+              {"name": "resolutionNumber", "type": "string", "required": true},
+              {"name": "issuedOn", "type": "date", "required": true},
+              {"name": "effectiveFrom", "type": "date", "required": true},
+              {"name": "effectiveTo", "type": "date", "required": false},
+              {"name": "retroactive", "type": "bool", "required": true, "description": "True where effectiveFrom precedes issuedOn — which happens on Shariah non-compliance remediation. Requires a justification rather than being silently allowed."},
+              {"name": "retroactiveJustification", "type": "text", "required": false},
+              {"name": "status", "type": "enum", "required": true, "values": ["DRAFT", "ISSUED", "SUPERSEDED", "WITHDRAWN"]},
+              {"name": "rulingType", "type": "enum", "required": true, "values": ["PRODUCT_APPROVAL", "STRUCTURE_APPROVAL", "CONTRACT_TEMPLATE_APPROVAL", "TRANSACTION_RULING", "SCREENING_CRITERIA", "POLICY_PARAMETER", "METHOD_SELECTION", "REMEDIATION_DIRECTION", "NON_COMPLIANCE_DETERMINATION"], "description": "METHOD_SELECTION and POLICY_PARAMETER are what let Income Purification and Zakat Calculation point at an authority instead of hardcoding a formula."},
+              {"name": "subjectType", "type": "enum", "required": true, "values": ["PRODUCT", "CONTRACT_TEMPLATE", "SERVICE_DOMAIN", "COUNTERPARTY", "TRANSACTION", "JURISDICTION_POLICY", "CHARITY_POOL", "INSTITUTION"]},
+              {"name": "subjectRef", "type": "string", "required": true},
+              {"name": "scope", "type": "text", "required": true},
+              {"name": "decisionBasis", "type": "text", "required": true},
+              {"name": "basisSchoolNote", "type": "text", "required": false, "description": "Free text, deliberately NOT an enum of madhhabs. Attributing a ruling to a school of law is a scholarly claim this code must not encode as a closed list."},
+              {"name": "dissentRecorded", "type": "bool", "required": true},
+              {"name": "jurisdiction", "type": "iso3166Alpha2", "required": false, "description": "Null means not jurisdiction-scoped."},
+              {"name": "supersedesRulingId", "type": "uuid", "required": false},
+              {"name": "supersededByRulingId", "type": "uuid", "required": false},
+              {"name": "withdrawalReason", "type": "text", "required": false},
+              {"name": "documentUri", "type": "uri", "required": true},
+              {"name": "documentDigest", "type": "digest", "required": true, "description": "SHA-256 of the signed ruling document. This is what makes the repository evidence rather than a note."},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "policyPortWired", "type": "bool", "required": true}
+            ],
+            "identifiers": [
+              {"field": "rulingId", "kind": "primary"},
+              {"field": "resolutionNumber", "kind": "natural", "note": "UNIQUE (boardId, resolutionNumber)."},
+              {"field": "boardId", "kind": "foreign", "target": "isb-shariah-supervisory-board-directory"},
+              {"field": "supersedesRulingId", "kind": "foreign", "target": "self"},
+              {"field": "supersededByRulingId", "kind": "foreign", "target": "self"},
+              {"field": "subjectRef", "kind": "correlation"}
+            ],
+            "money": [],
+            "ratios": []
+          },
+          "behaviourQualifiers": [
+            {"name": "Ruling Signatory", "cardinality": "many", "actionTerms": ["Register", "Retrieve"], "fields": [
+              {"name": "mandateId", "type": "uuid", "required": true},
+              {"name": "memberName", "type": "string", "required": true},
+              {"name": "position", "type": "enum", "required": true, "values": ["CONCUR", "DISSENT", "ABSTAIN", "RECUSED"]},
+              {"name": "signedOn", "type": "date", "required": true},
+              {"name": "signatureDigest", "type": "digest", "required": false},
+              {"name": "actedUnderDelegationCode", "type": "string", "required": false}
+            ]},
+            {"name": "Cited Standard", "cardinality": "many", "actionTerms": ["Register", "Retrieve"], "fields": [
+              {"name": "body", "type": "enum", "required": true, "values": ["AAOIFI", "IFSB", "REGULATOR", "CENTRAL_SHARIAH_BOARD", "CLASSICAL_SOURCE", "OTHER"]},
+              {"name": "standardCode", "type": "string", "required": true},
+              {"name": "standardTitle", "type": "string", "required": false},
+              {"name": "clause", "type": "string", "required": true},
+              {"name": "primaryTextObtained", "type": "bool", "required": true, "description": "False means the citation came from a secondary source. This is the field that stops the estate laundering commentary into authority."},
+              {"name": "note", "type": "text", "required": false}
+            ]},
+            {"name": "Ruling Applicability", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Terminate"], "fields": [
+              {"name": "serviceDomain", "type": "string", "required": false},
+              {"name": "productId", "type": "string", "required": false},
+              {"name": "jurisdiction", "type": "iso3166Alpha2", "required": false},
+              {"name": "productScope", "type": "string", "required": false},
+              {"name": "effectiveFrom", "type": "date", "required": true},
+              {"name": "effectiveTo", "type": "date", "required": false}
+            ]},
+            {"name": "Condition Of Approval", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Evaluate"], "fields": [
+              {"name": "conditionCode", "type": "string", "required": true},
+              {"name": "conditionText", "type": "text", "required": true},
+              {"name": "mandatory", "type": "bool", "required": true},
+              {"name": "verificationDueOn", "type": "date", "required": false},
+              {"name": "verifiedOn", "type": "date", "required": false},
+              {"name": "verifiedByOrgan", "type": "enum", "required": false, "values": ["SHARIAH_COMPLIANCE_FUNCTION", "INTERNAL_SHARIAH_AUDIT", "SSB", "EXTERNAL_AUDITOR"]},
+              {"name": "status", "type": "enum", "required": true, "values": ["OPEN", "MET", "BREACHED", "WAIVED"]}
+            ]},
+            {"name": "Amendment History", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "amendedOn", "type": "date", "required": true},
+              {"name": "amendmentReference", "type": "string", "required": true},
+              {"name": "changeSummary", "type": "text", "required": true},
+              {"name": "priorDocumentDigest", "type": "digest", "required": true}
+            ]}
+          ],
+          "rules": [
+            {"id": "ISB-GOV-FTW-01", "scope": "local", "assert": "cr.status == 'ISSUED' implies count(RulingSignatory where position == 'CONCUR') >= 1", "onViolation": "reject", "rationale": "A ruling with no concurring signatory is not a ruling. AAOIFI GS 18."},
+            {"id": "ISB-GOV-FTW-02", "scope": "cross-domain", "dependsOn": ["isb-shariah-supervisory-board-directory"], "assert": "all RulingSignatory: effectiveAt(mandateId, cr.issuedOn) == 'ACTIVE'", "onViolation": "flag", "rationale": "Every signatory must have held an ACTIVE mandate on the issuance date. Needs the directory's state, so it generates a PolicyPort; while unwired it flags and policyPortWired records that it did.", "emits": "fatwa.signatory.mandate.unverified"},
+            {"id": "ISB-GOV-FTW-03", "scope": "local", "assert": "cr.retroactive == (cr.effectiveFrom < cr.issuedOn) && (cr.retroactive implies cr.retroactiveJustification is not null)", "onViolation": "reject", "rationale": "Retroactive effect is real in remediation but must be declared and justified, never inferred from the dates."},
+            {"id": "ISB-GOV-FTW-04", "scope": "local", "assert": "no in-place update of documentDigest, documentUri, issuedOn, resolutionNumber or decisionBasis once cr.status == 'ISSUED'", "onViolation": "reject", "rationale": "An ISSUED ruling is immutable. A change is a new ruling that supersedes it, plus an Amendment History row carrying the prior digest. DESIGN.md §5.8."},
+            {"id": "ISB-GOV-FTW-05", "scope": "local", "assert": "cr.status == 'SUPERSEDED' implies (cr.supersededByRulingId is not null && cr.effectiveTo is not null)", "onViolation": "reject"},
+            {"id": "ISB-GOV-FTW-06", "scope": "local", "assert": "cr.supersedesRulingId is null || status(cr.supersedesRulingId) == 'SUPERSEDED'", "onViolation": "reject", "rationale": "Supersession is a closed two-sided link, so 'which ruling governs date D' has exactly one answer."},
+            {"id": "ISB-GOV-FTW-07", "scope": "local", "assert": "cr.status == 'WITHDRAWN' implies cr.withdrawalReason is not null", "onViolation": "reject"},
+            {"id": "ISB-GOV-FTW-08", "scope": "local", "assert": "cr.rulingType in ['SCREENING_CRITERIA','POLICY_PARAMETER','METHOD_SELECTION'] implies count(CitedStandard) >= 1", "onViolation": "flag", "rationale": "A ruling that sets a screening criterion, a policy parameter or a computation method with no cited standard is unsourced. It is recorded and flagged rather than rejected — an SSB may rule on its own authority — but it never passes silently.", "emits": "fatwa.unsourced.parameter.recorded"},
+            {"id": "ISB-GOV-FTW-09", "scope": "local", "assert": "all CitedStandard: (body in ['AAOIFI','IFSB'] implies (standardCode is not null && clause is not null))", "onViolation": "reject", "rationale": "A bare 'per AAOIFI' is not a citation. Code and clause or nothing."},
+            {"id": "ISB-GOV-FTW-10", "scope": "local", "assert": "count(CitedStandard where primaryTextObtained == false) == 0", "onViolation": "flag", "rationale": "Secondary-source citations are permitted and labelled. The flag is the label.", "emits": "fatwa.secondary.source.citation.recorded"},
+            {"id": "ISB-GOV-FTW-11", "scope": "local", "assert": "cr.dissentRecorded == (count(RulingSignatory where position == 'DISSENT') > 0)", "onViolation": "reject", "rationale": "The dissent flag must match the signatory rows; a hidden dissent is the one thing a ruling repository must not be able to do."},
+            {"id": "ISB-GOV-FTW-12", "scope": "local", "assert": "count(ConditionOfApproval where mandatory == true && status == 'BREACHED') == 0", "onViolation": "flag", "emits": "fatwa.condition.breached"}
+          ],
+          "events": [
+            {"name": "fatwa.issued", "payload": "rulingId, boardId, resolutionNumber, rulingType, subjectType, subjectRef, issuedOn, effectiveFrom, effectiveTo, jurisdiction, documentDigest, dissentRecorded"},
+            {"name": "fatwa.superseded", "payload": "rulingId, supersededByRulingId, effectiveTo, supersededAt"},
+            {"name": "fatwa.withdrawn", "payload": "rulingId, withdrawalReason, withdrawnAt"},
+            {"name": "fatwa.applicability.changed", "payload": "rulingId, serviceDomain, productId, jurisdiction, effectiveFrom, effectiveTo"},
+            {"name": "fatwa.condition.breached", "payload": "rulingId, conditionCode, mandatory, detectedAt"},
+            {"name": "fatwa.unsourced.parameter.recorded", "payload": "rulingId, rulingType, subjectRef, recordedAt"},
+            {"name": "fatwa.secondary.source.citation.recorded", "payload": "rulingId, body, standardCode, clause"},
+            {"name": "fatwa.signatory.mandate.unverified", "payload": "rulingId, mandateId, issuedOn, reason"}
+          ],
+          "shariah": {
+            "contractType": null,
+            "contractTypeNote": "Not a contract. This is the authority register every other domain in the estate cites — a rule, a screening criterion, a zakat method and a purification formula each point at a rulingId here, which is how the code stops manufacturing authority.",
+            "capitalAtRisk": false,
+            "reviewed": false,
+            "reviewStatus": "UNREVIEWED — requires named Shariah board sign-off",
+            "standards": [
+              {"body": "AAOIFI", "code": "GS 18", "title": "Shari'ah Decision-Making Process", "note": "The signatory, delegation and dissent model."},
+              {"body": "AAOIFI", "code": "GS 20", "title": "SSB Functions and Operations"},
+              {"body": "AAOIFI", "code": "GS 1 (Revised 2024)", "title": "Shari'ah Governance Framework"},
+              {"body": "AAOIFI", "code": "GS 21", "title": "SSB Review and Report"},
+              {"body": "IFSB", "code": "IFSB-31", "title": "Guiding Principles for Effective Supervision of Shariah Governance", "note": "Principle 9 refers to approved screening criteria — the SCREENING_CRITERIA ruling type exists so those criteria have an authority to point at."}
+            ]
+          },
+          "uncertain": [
+            "The required quorum and voting threshold for a valid ruling. Modelled through Ruling Signatory positions and the Delegated Authority BQ of the SSB directory, with no threshold asserted, because the primary GS 18 / GS 20 texts were not obtained.",
+            "Whether a dissenting opinion must be published. The repository can record and digest it; whether it must be disclosed is a GS 21 / jurisdictional question left open.",
+            "Madhhab attribution is deliberately free text. Any closed enum here would be the code taking a scholarly position.",
+            "Retroactive effect. Modelled as a declared, justified flag. Whether a retroactive Shariah ruling may validate or void a settled transaction is not something this catalog decides."
+          ]
+        },
+
+        {
+          "name": "Shariah Compliance Review",
+          "functionalPattern": "Assess",
+          "assetType": "Shariah Compliance Case",
+          "isTheGate": true,
+          "gateHonesty": "THE MOST CONSEQUENTIAL COMPONENT IN THE ESTATE, AND THE EASIEST TO OVERSTATE. Transaction-level Shariah screening is a regulatory requirement in exactly ONE jurisdiction for ONE product: Bangladesh Bank IBRPD Circular No. 01 of 27 September 2026, 'Guidelines on Islamic Credit Card Operations of Banks'. Everywhere else — including the Malaysian MCC blocking practised by Maybank Islamic Ikhwan, AmBank Islamic and Bank Islam Card-i — it is ISSUER PRACTICE, not regulation. That fact is not a README footnote here: it is the mandateBasis enum on every screening policy, it is enforced by rule ISB-GOV-SCR-02, and a gate running in ENFORCING mode without a recorded basis is rejected. The rule set itself is DATA (ScreeningPolicy + ScreeningCriterion rows, per jurisdiction, per product scope, effective-dated, each approved by a rulingId). There is no screening logic in code — the generated rules component evaluates rows and cannot evaluate anything else.",
+          "controlRecord": {
+            "name": "Shariah Compliance Case Assessment",
+            "table": "shariah_compliance_case_assessment",
+            "fields": [
+              {"name": "caseId", "type": "uuid", "required": true},
+              {"name": "caseType", "type": "enum", "required": true, "values": ["PRE_LAUNCH_PRODUCT_REVIEW", "CONTRACT_INTEGRITY_REVIEW", "TRANSACTION_SCREENING", "COUNTERPARTY_SCREENING", "NON_COMPLIANCE_INVESTIGATION", "PERIODIC_PRODUCT_REVIEW"]},
+              {"name": "subjectType", "type": "enum", "required": true, "values": ["PRODUCT", "CONTRACT_TEMPLATE", "PAYMENT_ORDER", "CARD_AUTHORIZATION", "COUNTERPARTY", "SERVICE_DOMAIN", "ACCOUNT", "FINANCING_ARRANGEMENT"]},
+              {"name": "subjectRef", "type": "string", "required": true},
+              {"name": "jurisdiction", "type": "iso3166Alpha2", "required": true},
+              {"name": "productScope", "type": "string", "required": true, "description": "e.g. ISLAMIC_CREDIT_CARD. Carried because the only regulation that mandates transaction screening mandates it for one product."},
+              {"name": "policyId", "type": "uuid", "required": true},
+              {"name": "policyVersion", "type": "int64", "required": true, "description": "Monotonic. Recorded on the decision so the decision is replayable against the exact rule set that produced it."},
+              {"name": "criteriaListVersion", "type": "int64", "required": true},
+              {"name": "gateMode", "type": "enum", "required": true, "values": ["ENFORCING", "ADVISORY", "DISABLED"], "description": "Per-jurisdiction, per-product. DISABLED still writes a case with decision NOT_APPLICABLE — a silent gate is worse than an absent one."},
+              {"name": "mandateBasis", "type": "enum", "required": true, "values": ["REGULATION", "ISSUER_PRACTICE", "NOT_REQUIRED"], "description": "Why this gate is running at all. REGULATION is correct for BD/ISLAMIC_CREDIT_CARD and, on the evidence behind this design, for nothing else."},
+              {"name": "mandateBasisReference", "type": "string", "required": false, "description": "Required when mandateBasis == REGULATION. e.g. 'Bangladesh Bank IBRPD Circular No. 01, 27 Sep 2026, s.45 Bank Company Act 1991'."},
+              {"name": "decision", "type": "enum", "required": true, "values": ["ALLOW", "REFER", "BLOCK", "NOT_APPLICABLE"], "description": "Exactly three outcomes plus the disabled case. There is no 'HALAL' value and there never will be."},
+              {"name": "decisionReasonCode", "type": "string", "required": true, "description": "Names the criterionId that fired, or the policy's declared defaultOutcome. Never free text."},
+              {"name": "firedCriterionId", "type": "uuid", "required": false},
+              {"name": "appliedByRulingId", "type": "uuid", "required": false, "description": "The SSB ruling behind the criterion. Mandatory for a BLOCK."},
+              {"name": "evidenceQuality", "type": "enum", "required": true, "values": ["DIRECT", "PROXY", "ABSENT"], "description": "An MCC or an ISO 20022 purpose code is a PROXY: a supermarket selling alcohol carries one code, and purpose codes are customer-supplied and absent on most domestic rails. The estate may never present a PROXY match as a determination."},
+              {"name": "customerVisibleReason", "type": "text", "required": false, "description": "Required for a BLOCK. Blocking a payment on religious grounds without a reason the customer can see is itself a consumer-protection problem."},
+              {"name": "decidedAt", "type": "timestamp", "required": true},
+              {"name": "decidedBy", "type": "enum", "required": true, "values": ["SYSTEM", "REVIEWER", "SSB"]},
+              {"name": "reviewerPartyId", "type": "string", "required": false},
+              {"name": "supersedesCaseId", "type": "uuid", "required": false, "description": "A changed outcome is a new case. Decisions are never edited."},
+              {"name": "interactionId", "type": "string", "required": false, "description": "x-fapi-interaction-id, correlation only. Never trusted as identity (DESIGN.md §5.6)."},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "policyPortWired", "type": "bool", "required": true}
+            ],
+            "identifiers": [
+              {"field": "caseId", "kind": "primary"},
+              {"field": "policyId", "kind": "foreign", "target": "self", "note": "FK to the ScreeningPolicy BQ row of the owning policy case."},
+              {"field": "firedCriterionId", "kind": "foreign", "target": "self"},
+              {"field": "appliedByRulingId", "kind": "foreign", "target": "isb-fatwa-and-ruling-repository"},
+              {"field": "subjectRef", "kind": "correlation"},
+              {"field": "interactionId", "kind": "correlation"},
+              {"field": "supersedesCaseId", "kind": "foreign", "target": "self"}
+            ],
+            "money": [],
+            "ratios": []
+          },
+          "behaviourQualifiers": [
+            {"name": "Screening Policy", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Update", "Control"], "fields": [
+              {"name": "policyId", "type": "uuid", "required": true},
+              {"name": "jurisdiction", "type": "iso3166Alpha2", "required": true},
+              {"name": "productScope", "type": "string", "required": true},
+              {"name": "version", "type": "int64", "required": true},
+              {"name": "gateMode", "type": "enum", "required": true, "values": ["ENFORCING", "ADVISORY", "DISABLED"]},
+              {"name": "mandateBasis", "type": "enum", "required": true, "values": ["REGULATION", "ISSUER_PRACTICE", "NOT_REQUIRED"]},
+              {"name": "mandateBasisReference", "type": "string", "required": false},
+              {"name": "defaultOutcome", "type": "enum", "required": true, "values": ["ALLOW", "REFER", "BLOCK"], "description": "Deny-by-default is CONFIGURABLE, not assumed. A deployment that defaults to BLOCK in a jurisdiction where screening is not required will break legitimate payments."},
+              {"name": "approvedByRulingId", "type": "uuid", "required": true},
+              {"name": "referralSlaHours", "type": "int32", "required": true},
+              {"name": "effectiveFrom", "type": "timestamp", "required": true},
+              {"name": "effectiveTo", "type": "timestamp", "required": false},
+              {"name": "status", "type": "enum", "required": true, "values": ["DRAFT", "ACTIVE", "RETIRED"]}
+            ]},
+            {"name": "Screening Criterion", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Control"], "fields": [
+              {"name": "criterionId", "type": "uuid", "required": true},
+              {"name": "policyId", "type": "uuid", "required": true},
+              {"name": "selectorType", "type": "enum", "required": true, "values": ["MCC", "ISO20022_PURPOSE", "MERCHANT_NAME_PATTERN", "COUNTERPARTY_ID", "COUNTERPARTY_SECTOR", "ACTIVITY_RATIO", "CONTRACT_TYPE"], "description": "MCC is ISO 18245; ISO20022_PURPOSE is the 4-character Purpose / ExtendedPurpose element. Both are proxies by construction — see rule ISB-GOV-SCR-04."},
+              {"name": "selectorValue", "type": "string", "required": true},
+              {"name": "matchMode", "type": "enum", "required": true, "values": ["EXACT", "PREFIX", "RANGE", "SET_MEMBER", "REGEX"]},
+              {"name": "outcome", "type": "enum", "required": true, "values": ["ALLOW", "REFER", "BLOCK"]},
+              {"name": "precedence", "type": "int32", "required": true},
+              {"name": "evidenceQuality", "type": "enum", "required": true, "values": ["DIRECT", "PROXY", "ABSENT"]},
+              {"name": "approvedByRulingId", "type": "uuid", "required": true},
+              {"name": "customerVisibleReason", "type": "text", "required": false},
+              {"name": "note", "type": "text", "required": false}
+            ]},
+            {"name": "Screening Decision Trace", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "evaluationOrder", "type": "int32", "required": true},
+              {"name": "criterionId", "type": "uuid", "required": true},
+              {"name": "matched", "type": "bool", "required": true},
+              {"name": "inputSelectorType", "type": "enum", "required": true, "values": ["MCC", "ISO20022_PURPOSE", "MERCHANT_NAME_PATTERN", "COUNTERPARTY_ID", "COUNTERPARTY_SECTOR", "ACTIVITY_RATIO", "CONTRACT_TYPE"]},
+              {"name": "inputSelectorValue", "type": "string", "required": false},
+              {"name": "inputHashed", "type": "bool", "required": true, "description": "Counterparty identifiers are hashed before they reach the trace; the flag says which form the row holds, so a replay knows what it can and cannot re-derive."},
+              {"name": "inputSelectorValueDigest", "type": "digest", "required": false}
+            ]},
+            {"name": "Referral", "cardinality": "many", "actionTerms": ["Request", "Retrieve", "Record", "Execute"], "fields": [
+              {"name": "referralId", "type": "uuid", "required": true},
+              {"name": "referredAt", "type": "timestamp", "required": true},
+              {"name": "referredTo", "type": "enum", "required": true, "values": ["SHARIAH_COMPLIANCE_FUNCTION", "SSB", "CENTRAL_SHARIAH_BOARD"]},
+              {"name": "slaDueAt", "type": "timestamp", "required": true},
+              {"name": "reviewerPartyId", "type": "string", "required": false},
+              {"name": "outcome", "type": "enum", "required": false, "values": ["ALLOW", "BLOCK", "ESCALATE"]},
+              {"name": "outcomeRecordedAt", "type": "timestamp", "required": false},
+              {"name": "outcomeRulingId", "type": "uuid", "required": false},
+              {"name": "note", "type": "text", "required": false}
+            ]},
+            {"name": "Non Compliance Event", "cardinality": "many", "actionTerms": ["Record", "Retrieve", "Evaluate", "Execute"], "fields": [
+              {"name": "sncEventId", "type": "uuid", "required": true},
+              {"name": "detectedAt", "type": "timestamp", "required": true},
+              {"name": "detectionSource", "type": "enum", "required": true, "values": ["GATE", "INTERNAL_SHARIAH_AUDIT", "EXTERNAL_AUDIT", "SELF_REPORT", "REGULATOR", "CUSTOMER_COMPLAINT"]},
+              {"name": "affectedContractRef", "type": "string", "required": true},
+              {"name": "affectedContractType", "type": "enum", "required": true, "values": ["Mudarabah", "Musharakah", "Wakala", "Wadiah", "QardHassan", "Murabaha", "Ijara", "IjaraMuntahiaBittamleek", "Istisna", "Salam", "Sukuk", "Tawarruq", "Ujrah", "Takaful", "NONE"]},
+              {"name": "determination", "type": "enum", "required": true, "values": ["PENDING", "VOID", "RECTIFY", "INCOME_CLASSIFIED_SNC", "NO_BREACH"]},
+              {"name": "determinedByRulingId", "type": "uuid", "required": false},
+              {"name": "determinedAt", "type": "timestamp", "required": false},
+              {"name": "quarantinedAmount", "type": "money", "required": false},
+              {"name": "segregatedLiabilityAccountRef", "type": "string", "required": false},
+              {"name": "fundingAccountContractType", "type": "enum", "required": false, "values": ["Mudarabah", "Musharakah", "Wakala", "Wadiah", "QardHassan", "SHAREHOLDER_FUNDS", "SEGREGATED_LIABILITY"]},
+              {"name": "charityChannelledAmount", "type": "money", "required": false},
+              {"name": "charityPoolId", "type": "uuid", "required": false},
+              {"name": "channelledOn", "type": "date", "required": false},
+              {"name": "recognisedAsIncome", "type": "bool", "required": true, "description": "Must be false. Present as a field so the invariant is assertable and auditable rather than implicit."}
+            ]},
+            {"name": "Contract Integrity Check", "cardinality": "many", "actionTerms": ["Evaluate", "Retrieve", "Record"], "fields": [
+              {"name": "checkCode", "type": "enum", "required": true, "values": ["MURABAHA_POSSESSION_BEFORE_ONWARD_SALE", "SET_OFF_CURRENCY_OR_PREVAILING_RATE", "NO_GUARANTEED_OBLIGATION_ON_IAH_POOL", "NO_ACCRUAL_ON_ARREARS", "FIXED_TOTAL_SALE_PRICE", "CHARITY_UNDERTAKING_SEPARATE_FROM_INCOME"], "description": "AAOIFI SS 8 §3/2 (possession and risk transfer before onward sale), SS 3 §2/5/3 (set-off currency), SS 13 §9/6 (nothing charged to the IAH pool), SS 47 §5 (no accrual on arrears), SS 8 §4/3 and SS 47 §9 (fixed total price disclosed), SS 3 §2/1/4 and §2/1/8 (recovery costs and charity undertaking as separate non-income lines)."},
+              {"name": "passed", "type": "bool", "required": true},
+              {"name": "observedValue", "type": "text", "required": false},
+              {"name": "expectedValue", "type": "text", "required": false},
+              {"name": "citedStandardCode", "type": "string", "required": true},
+              {"name": "citedClause", "type": "string", "required": true},
+              {"name": "approvedByRulingId", "type": "uuid", "required": false}
+            ]},
+            {"name": "Gate Exemption", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Terminate"], "fields": [
+              {"name": "jurisdiction", "type": "iso3166Alpha2", "required": true},
+              {"name": "productScope", "type": "string", "required": true},
+              {"name": "exemptFrom", "type": "timestamp", "required": true},
+              {"name": "exemptTo", "type": "timestamp", "required": false},
+              {"name": "approvedByRulingId", "type": "uuid", "required": true},
+              {"name": "reason", "type": "text", "required": true}
+            ]}
+          ],
+          "rules": [
+            {"id": "ISB-GOV-SCR-01", "scope": "local", "assert": "cr.decision == 'BLOCK' implies (cr.appliedByRulingId is not null && cr.customerVisibleReason is not null)", "onViolation": "reject", "rationale": "The estate may never block a payment on religious grounds without a recorded, SSB-approved rule AND a reason the customer can read.", "testVectors": [{"name": "block without ruling is refused", "given": "decision=BLOCK, appliedByRulingId=null, customerVisibleReason='Merchant category not permitted'", "expect": "422 ISB-GOV-SCR-01"}, {"name": "block without customer reason is refused", "given": "decision=BLOCK, appliedByRulingId=R1, customerVisibleReason=null", "expect": "422 ISB-GOV-SCR-01"}]},
+            {"id": "ISB-GOV-SCR-02", "scope": "local", "assert": "cr.gateMode == 'ENFORCING' implies (cr.mandateBasis in ['REGULATION','ISSUER_PRACTICE'] && (cr.mandateBasis == 'REGULATION' implies cr.mandateBasisReference is not null))", "onViolation": "reject", "rationale": "This is the one-jurisdiction fact made executable. An enforcing gate must name why it enforces. On the evidence behind this design, only BD + ISLAMIC_CREDIT_CARD can honestly answer REGULATION.", "testVectors": [{"name": "BD islamic credit card enforces on regulation", "given": "jurisdiction=BD, productScope=ISLAMIC_CREDIT_CARD, gateMode=ENFORCING, mandateBasis=REGULATION, mandateBasisReference='Bangladesh Bank IBRPD Circular No. 01, 27 Sep 2026'", "expect": "accepted"}, {"name": "enforcing with NOT_REQUIRED basis is refused", "given": "jurisdiction=GB, gateMode=ENFORCING, mandateBasis=NOT_REQUIRED", "expect": "422 ISB-GOV-SCR-02"}, {"name": "MY issuer practice may enforce without a regulation reference", "given": "jurisdiction=MY, productScope=ISLAMIC_CREDIT_CARD, gateMode=ENFORCING, mandateBasis=ISSUER_PRACTICE, mandateBasisReference=null", "expect": "accepted"}]},
+            {"id": "ISB-GOV-SCR-03", "scope": "local", "assert": "exists(ScreeningPolicy where policyId == cr.policyId && version == cr.policyVersion && status == 'ACTIVE' && effectiveFrom <= cr.decidedAt && (effectiveTo is null || effectiveTo > cr.decidedAt))", "onViolation": "reject", "rationale": "No decision may exist without the exact policy version that produced it being present and effective at decision time. This is what makes the rule set DATA: a decision the code could have reached without a row is refused."},
+            {"id": "ISB-GOV-SCR-04", "scope": "local", "assert": "all ScreeningCriterion: (selectorType in ['MCC','ISO20022_PURPOSE','MERCHANT_NAME_PATTERN'] implies evidenceQuality != 'DIRECT')", "onViolation": "reject", "rationale": "An MCC or a purpose code is a coarse proxy — one code per mixed merchant, customer-supplied, absent on most domestic rails. Recording such a match as DIRECT evidence would turn a proxy into a determination."},
+            {"id": "ISB-GOV-SCR-05", "scope": "local", "assert": "cr.firedCriterionId is not null || cr.decisionReasonCode == concat('POLICY_DEFAULT:', cr.policyId)", "onViolation": "reject", "rationale": "Every decision names the criterion that fired or the policy default. There is no third source of a decision, and in particular no code path."},
+            {"id": "ISB-GOV-SCR-06", "scope": "local", "assert": "cr.decision == 'REFER' implies count(Referral) >= 1", "onViolation": "reject"},
+            {"id": "ISB-GOV-SCR-07", "scope": "local", "assert": "count(Referral where outcome is null && slaDueAt < now()) == 0", "onViolation": "flag", "rationale": "An unresolved referral past SLA is an operational signal, not a reason to refuse the write.", "emits": "shariah.referral.sla.breached"},
+            {"id": "ISB-GOV-SCR-08", "scope": "local", "assert": "cr.gateMode == 'DISABLED' implies cr.decision == 'NOT_APPLICABLE'", "onViolation": "reject", "rationale": "A disabled gate still writes a case. The alternative — no row at all — makes 'was screening on' unanswerable after the fact."},
+            {"id": "ISB-GOV-SCR-09", "scope": "local", "assert": "all NonComplianceEvent: recognisedAsIncome == false", "onViolation": "reject", "rationale": "Shariah non-compliant income never enters P&L. AAOIFI SS 13 §9/6 and GS 9."},
+            {"id": "ISB-GOV-SCR-10", "scope": "local", "assert": "all NonComplianceEvent: (quarantinedAmount is null || (fundingAccountContractType not in ['Mudarabah','Musharakah','Wakala'] && segregatedLiabilityAccountRef is not null))", "onViolation": "reject", "rationale": "Quarantined SNC income sits in a segregated liability and is never funded from an investment-account-holder pool. AAOIFI SS 13 §9/6: the Mudarib may not make a gift or charitable donation out of Mudarabah funds."},
+            {"id": "ISB-GOV-SCR-11", "scope": "local", "assert": "all NonComplianceEvent: (charityChannelledAmount is null || (charityChannelledAmount.currency == quarantinedAmount.currency && charityChannelledAmount.minor <= quarantinedAmount.minor && charityChannelledAmount.minor >= 0))", "onViolation": "reject", "rationale": "Integer minor units, one currency, never more channelled than quarantined.", "testVectors": [{"name": "BHD 3-decimal channelling within quarantine", "given": "quarantinedAmount={minor:1000,currency:BHD,exponent:3}, charityChannelledAmount={minor:1000,currency:BHD,exponent:3}", "expect": "accepted"}, {"name": "JPY 0-decimal over-channelling refused", "given": "quarantinedAmount={minor:100,currency:JPY,exponent:0}, charityChannelledAmount={minor:101,currency:JPY,exponent:0}", "expect": "422 ISB-GOV-SCR-11"}, {"name": "currency mismatch refused", "given": "quarantinedAmount={minor:100,currency:USD,exponent:2}, charityChannelledAmount={minor:100,currency:BHD,exponent:3}", "expect": "422 ISB-GOV-SCR-11"}]},
+            {"id": "ISB-GOV-SCR-12", "scope": "local", "assert": "all NonComplianceEvent: (determination != 'PENDING' implies (determinedByRulingId is not null && determinedAt is not null))", "onViolation": "reject", "rationale": "The service records and routes; the SSB determines. A determination with no ruling behind it is the code pretending to be a scholar."},
+            {"id": "ISB-GOV-SCR-13", "scope": "local", "assert": "no in-place update of decision, decisionReasonCode, firedCriterionId, policyVersion, criteriaListVersion, decidedAt or evidenceQuality once the case row exists", "onViolation": "reject", "rationale": "A changed outcome is a new case with supersedesCaseId set. DESIGN.md §5.8 — append-only for every Shariah non-compliance finding."},
+            {"id": "ISB-GOV-SCR-14", "scope": "local", "assert": "cr.supersedesCaseId is null || status(cr.supersedesCaseId) is not null", "onViolation": "reject"},
+            {"id": "ISB-GOV-SCR-15", "scope": "cross-domain", "dependsOn": ["isb-fatwa-and-ruling-repository"], "assert": "cr.appliedByRulingId is null || effectiveAt(cr.appliedByRulingId, cr.decidedAt) == 'ISSUED'", "onViolation": "flag", "rationale": "A decision may not cite a withdrawn or not-yet-effective ruling. Needs the repository's state; degrades to flag while the PolicyPort is unwired.", "emits": "shariah.decision.ruling.unverified"},
+            {"id": "ISB-GOV-SCR-16", "scope": "local", "assert": "all ContractIntegrityCheck: (citedStandardCode is not null && citedClause is not null)", "onViolation": "reject", "rationale": "A contract-integrity check with no clause behind it is an opinion in a boolean."},
+            {"id": "ISB-GOV-SCR-17", "scope": "local", "assert": "all ScreeningCriterion: (outcome == 'BLOCK' implies (approvedByRulingId is not null && customerVisibleReason is not null))", "onViolation": "reject", "rationale": "The BLOCK requirement is enforced where the criterion is authored, not only where it fires."},
+            {"id": "ISB-GOV-SCR-18", "scope": "local", "assert": "count(ScreeningCriterion group by policyId, precedence having count > 1) == 0", "onViolation": "reject", "rationale": "Ambiguous precedence makes a decision non-replayable."}
+          ],
+          "events": [
+            {"name": "shariah.case.opened", "payload": "caseId, caseType, subjectType, subjectRef, jurisdiction, productScope, gateMode, mandateBasis, openedAt, interactionId"},
+            {"name": "shariah.decision.recorded", "payload": "caseId, decision, decisionReasonCode, firedCriterionId, appliedByRulingId, evidenceQuality, policyId, policyVersion, criteriaListVersion, decidedAt, decidedBy"},
+            {"name": "shariah.case.referred", "payload": "caseId, referralId, referredTo, referredAt, slaDueAt"},
+            {"name": "shariah.referral.resolved", "payload": "caseId, referralId, outcome, outcomeRulingId, outcomeRecordedAt, reviewerPartyId"},
+            {"name": "shariah.referral.sla.breached", "payload": "caseId, referralId, slaDueAt, observedAt"},
+            {"name": "shariah.noncompliance.detected", "payload": "caseId, sncEventId, detectionSource, affectedContractRef, affectedContractType, detectedAt"},
+            {"name": "shariah.noncompliance.determined", "payload": "sncEventId, determination, determinedByRulingId, determinedAt"},
+            {"name": "shariah.income.quarantined", "payload": "sncEventId, quarantinedAmount, segregatedLiabilityAccountRef, fundingAccountContractType"},
+            {"name": "shariah.income.channelled", "payload": "sncEventId, charityChannelledAmount, charityPoolId, channelledOn"},
+            {"name": "shariah.policy.version.activated", "payload": "policyId, version, jurisdiction, productScope, gateMode, mandateBasis, mandateBasisReference, defaultOutcome, approvedByRulingId, effectiveFrom"},
+            {"name": "shariah.gate.mode.changed", "payload": "policyId, jurisdiction, productScope, fromMode, toMode, approvedByRulingId, changedAt"},
+            {"name": "shariah.gate.exempted", "payload": "jurisdiction, productScope, exemptFrom, exemptTo, approvedByRulingId, reason"},
+            {"name": "shariah.decision.ruling.unverified", "payload": "caseId, appliedByRulingId, decidedAt, reason"},
+            {"name": "shariah.contract.integrity.failed", "payload": "caseId, checkCode, observedValue, expectedValue, citedStandardCode, citedClause"}
+          ],
+          "shariah": {
+            "contractType": null,
+            "contractTypeNote": "The gate assesses contracts; it is not one. affectedContractType on a non-compliance event carries the contract under assessment.",
+            "capitalAtRisk": false,
+            "reviewed": false,
+            "reviewStatus": "UNREVIEWED — requires named Shariah board sign-off. This is the single most consequential block in the estate: every criterion row, every default outcome and every contract-integrity check code below is a developer's reading of a standard until a named SSB signs it.",
+            "standards": [
+              {"body": "REGULATOR", "code": "Bangladesh Bank IBRPD Circular No. 01", "title": "Guidelines on Islamic Credit Card Operations of Banks", "note": "Dated 27 September 2026 (12 Ashwin 1433), issued under s.45 Bank Company Act 1991, in force immediately. §3 requires that all products, contracts, transactions, fees, charges and operational processes be conducted in accordance with Shariah. THE ONLY central-bank instrument found that puts transaction-level Shariah screening in regulation. CAVEAT recorded in the research: the annexed guidelines in the published PDF are image-only, so the MCC detail (alcohol, gambling, conventional insurance, pork processing, interest-based financial services) comes from press reporting of the circular, not from extracted text."},
+              {"body": "IFSB", "code": "IFSB-31", "title": "Guiding Principles for Effective Supervision of Shariah Governance", "note": "Adopted Jul 2025. Principle 8 (outsourcing does not move responsibility — hence a vendor verdict is data with a source and asOf, never an authority), Principle 9 ('approved screening criteria' — hence ScreeningCriterion.approvedByRulingId), Principles 9-10 (the institution records and routes a non-compliance; it does not self-absolve)."},
+              {"body": "IFSB", "code": "IFSB-30", "title": "Revised Guiding Principles on Corporate Governance for IIFS", "note": "Adopted Dec 2023."},
+              {"body": "AAOIFI", "code": "GS 9", "title": "Shari'ah Compliance Function", "note": "The organ a REFER is routed to."},
+              {"body": "AAOIFI", "code": "SS 13", "clause": "§9/6", "title": "Mudarabah", "note": "The Mudarib may not make a loan, gift or charitable donation out of Mudarabah funds — the basis for ISB-GOV-SCR-10 and for the charity domain's funding restriction."},
+              {"body": "AAOIFI", "code": "SS 3", "clause": "§2/1/4, §2/1/8, §2/5/3", "title": "Procrastinating Debtor (Revised)", "note": "Recovery costs and the charity undertaking as separate non-income lines; set-off in the same currency or at the prevailing rate. Amendments adopted at Board meeting No. 38, 26-28 June 2014."},
+              {"body": "AAOIFI", "code": "SS 8", "clause": "§3/2, §4/3", "title": "Murabaha", "note": "Possession and risk transfer before onward sale; fixed total sale price disclosed."},
+              {"body": "AAOIFI", "code": "SS 47", "clause": "§5, §9", "note": "No accrual on arrears; mandatory disclosure of the profit calculation."},
+              {"body": "AAOIFI", "code": "SS 21", "title": "Financial Paper (Shares and Bonds)", "note": "The business-activity and financial-ratio screens behind selectorType ACTIVITY_RATIO. The widely quoted 30/30/5 thresholds come ONLY from vendor and commentary sources in the research behind this design; the primary text was not obtained. No threshold is hardcoded anywhere in this entry — thresholds are ScreeningCriterion rows with a rulingId."},
+              {"body": "ISO", "code": "ISO 18245", "title": "Merchant Category Codes", "note": "The MCC selector's value space."},
+              {"body": "ISO", "code": "ISO 20022", "title": "Purpose / ExtendedPurpose", "note": "4-character Purpose; ExtendedPurpose is international-only in the Bahrain PISP spec and absent on most domestic rails."}
+            ]
+          },
+          "uncertain": [
+            "The Bangladesh circular's MCC list. The published PDF's annex is image-only; the categories named in press reporting were not extracted from the instrument. The catalog therefore ships NO MCC rows — only the table that holds them and the rule that a row needs a rulingId.",
+            "AAOIFI SS 21's 30/30/5 thresholds. Secondary sources only. Modelled as data, never as a constant.",
+            "Whether a REFER may time out to ALLOW. No source supports either answer, so the catalog makes an unresolved referral a flag and leaves the outcome null rather than inventing a timeout policy.",
+            "Whether a transaction already executed and later found non-compliant must be reversed, voided or merely purified. The determination enum records all three; the code never picks.",
+            "The contract-integrity check codes are a developer's enumeration of clause readings. Each carries its cited clause so a reviewer can disagree with a specific line rather than with a black box. Several (NO_GUARANTEED_OBLIGATION_ON_IAH_POOL, CHARITY_UNDERTAKING_SEPARATE_FROM_INCOME) are the ones most likely to be wrong in detail.",
+            "Deny-by-default. The catalog deliberately refuses to choose: defaultOutcome is a required policy field with no default value. A deny-by-default gate in a jurisdiction where screening is not required will refuse lawful payments, and that is itself a consumer-protection problem."
+          ]
+        },
+
+        {
+          "name": "Shariah Audit",
+          "functionalPattern": "Assess",
+          "assetType": "Shariah Audit Engagement",
+          "controlRecord": {
+            "name": "Shariah Audit Engagement Assessment",
+            "table": "shariah_audit_engagement_assessment",
+            "fields": [
+              {"name": "engagementId", "type": "uuid", "required": true},
+              {"name": "auditType", "type": "enum", "required": true, "values": ["INTERNAL_SHARIAH_AUDIT", "EXTERNAL_SHARIAH_AUDIT", "SSB_REVIEW", "REGULATORY_INSPECTION"]},
+              {"name": "auditorOrgan", "type": "enum", "required": true, "values": ["INTERNAL_SHARIAH_AUDIT", "EXTERNAL_AUDITOR", "SSB", "CENTRAL_SHARIAH_BOARD", "REGULATOR"]},
+              {"name": "auditorPartyId", "type": "string", "required": true},
+              {"name": "auditorMandateId", "type": "uuid", "required": false, "description": "Set where the auditor also holds a governance mandate — which is what makes the independence flag checkable."},
+              {"name": "periodFrom", "type": "date", "required": true},
+              {"name": "periodTo", "type": "date", "required": true},
+              {"name": "plannedStartOn", "type": "date", "required": true},
+              {"name": "fieldworkCompletedOn", "type": "date", "required": false},
+              {"name": "reportIssuedOn", "type": "date", "required": false},
+              {"name": "opinionType", "type": "enum", "required": true, "values": ["NOT_ISSUED", "UNQUALIFIED", "QUALIFIED", "ADVERSE", "DISCLAIMER"]},
+              {"name": "opinionRulingId", "type": "uuid", "required": false, "description": "The SSB report itself is a ruling in the repository (AAOIFI GS 21), not a PDF in a bucket."},
+              {"name": "auditingFramework", "type": "enum", "required": true, "values": ["AAOIFI_SOAA", "NATIONAL_STANDARD", "INTERNAL_METHODOLOGY", "OTHER"], "description": "AAOIFI SOAA 1 'Framework of Auditing' and SOAA 4 'Auditing Requirements for Assessing Compliance with Shari'ah' were issued Jan 2026; AGN 3 'Illustrative Auditor's Report' on 8 Nov 2026."},
+              {"name": "samplingMethod", "type": "enum", "required": true, "values": ["STATISTICAL", "JUDGEMENTAL", "FULL_POPULATION"]},
+              {"name": "populationSize", "type": "int64", "required": true},
+              {"name": "sampleSize", "type": "int32", "required": true},
+              {"name": "selectionSeed", "type": "int64", "required": false, "description": "Explicit PCG seed so a statistical sample is replayable (DESIGN.md D9 uses the same discipline for the seed universe). A sample nobody can redraw is not evidence."},
+              {"name": "externalAuditExemptionClaimed", "type": "bool", "required": true},
+              {"name": "externalAuditExemptionReference", "type": "string", "required": false},
+              {"name": "soaaAuditConfirmed", "type": "bool", "required": true, "description": "AGEB Statement 1/2025 grants the external Shariah audit exemption only where the institution is audited under AAOIFI's SOAAs. Claiming the exemption without this is the obvious abuse."},
+              {"name": "status", "type": "enum", "required": true, "values": ["PLANNED", "IN_PROGRESS", "REPORTED", "CLOSED"]},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "policyPortWired", "type": "bool", "required": true}
+            ],
+            "identifiers": [
+              {"field": "engagementId", "kind": "primary"},
+              {"field": "auditorPartyId", "kind": "foreign", "target": "isb-customer-reference-data"},
+              {"field": "auditorMandateId", "kind": "foreign", "target": "isb-shariah-supervisory-board-directory"},
+              {"field": "opinionRulingId", "kind": "foreign", "target": "isb-fatwa-and-ruling-repository"}
+            ],
+            "money": [],
+            "ratios": []
+          },
+          "behaviourQualifiers": [
+            {"name": "Engagement Scope", "cardinality": "many", "actionTerms": ["Register", "Retrieve"], "fields": [
+              {"name": "serviceDomain", "type": "string", "required": true},
+              {"name": "contractTypeInScope", "type": "enum", "required": false, "values": ["Mudarabah", "Musharakah", "Wakala", "Wadiah", "QardHassan", "Murabaha", "Ijara", "IjaraMuntahiaBittamleek", "Istisna", "Salam", "Sukuk", "Tawarruq", "Ujrah", "Takaful"]},
+              {"name": "jurisdiction", "type": "iso3166Alpha2", "required": false},
+              {"name": "rationale", "type": "text", "required": false}
+            ]},
+            {"name": "Audit Sample", "cardinality": "many", "actionTerms": ["Capture", "Retrieve"], "fields": [
+              {"name": "sampledEntityType", "type": "enum", "required": true, "values": ["CONTROL_RECORD", "TRANSACTION", "SCREENING_DECISION", "PROFIT_DISTRIBUTION_RUN", "ZAKAT_ASSESSMENT", "PURIFICATION_ENTRY", "CHARITY_OUTFLOW", "FATWA", "MANDATE"]},
+              {"name": "sampledEntityRef", "type": "string", "required": true},
+              {"name": "sourceServiceDomain", "type": "string", "required": true},
+              {"name": "drawnAt", "type": "timestamp", "required": true},
+              {"name": "drawOrdinal", "type": "int64", "required": true}
+            ]},
+            {"name": "Audit Finding", "cardinality": "many", "actionTerms": ["Record", "Retrieve", "Evaluate"], "fields": [
+              {"name": "findingId", "type": "uuid", "required": true},
+              {"name": "severity", "type": "enum", "required": true, "values": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "OBSERVATION"]},
+              {"name": "findingType", "type": "enum", "required": true, "values": ["SHARIAH_NON_COMPLIANCE", "CONTROL_WEAKNESS", "DISCLOSURE_GAP", "DOCUMENTATION_GAP", "GOVERNANCE_GAP", "CALCULATION_ERROR"]},
+              {"name": "affectedServiceDomain", "type": "string", "required": true},
+              {"name": "affectedEntityRef", "type": "string", "required": false},
+              {"name": "citedRulingId", "type": "uuid", "required": false},
+              {"name": "citedStandardCode", "type": "string", "required": false},
+              {"name": "citedClause", "type": "string", "required": false},
+              {"name": "correlatedSncEventId", "type": "uuid", "required": false, "description": "Set when the finding raised a non-compliance event in isb-shariah-compliance-review. Its absence on a SHARIAH_NON_COMPLIANCE finding is the dangling-finding case rule ISB-GOV-AUD-04 catches."},
+              {"name": "raisedOn", "type": "date", "required": true},
+              {"name": "managementResponse", "type": "text", "required": false},
+              {"name": "agreedByPartyId", "type": "string", "required": false},
+              {"name": "status", "type": "enum", "required": true, "values": ["RAISED", "ACCEPTED", "DISPUTED", "CLOSED"]}
+            ]},
+            {"name": "Remediation", "cardinality": "many", "actionTerms": ["Register", "Update", "Retrieve", "Evaluate"], "fields": [
+              {"name": "remediationId", "type": "uuid", "required": true},
+              {"name": "findingId", "type": "uuid", "required": true},
+              {"name": "ownerPartyId", "type": "string", "required": true},
+              {"name": "actionDescription", "type": "text", "required": true},
+              {"name": "dueOn", "type": "date", "required": true},
+              {"name": "status", "type": "enum", "required": true, "values": ["OPEN", "IN_PROGRESS", "DONE", "OVERDUE", "ACCEPTED_RISK"]},
+              {"name": "completedOn", "type": "date", "required": false},
+              {"name": "verifiedByEngagementId", "type": "uuid", "required": false, "description": "Closed by a LATER engagement, not by the owner. This is what makes 'remediation tracking' more than a status field."},
+              {"name": "acceptedRiskRulingId", "type": "uuid", "required": false}
+            ]},
+            {"name": "Audit Evidence", "cardinality": "many", "actionTerms": ["Capture", "Retrieve"], "fields": [
+              {"name": "evidenceRef", "type": "uri", "required": true},
+              {"name": "evidenceDigest", "type": "digest", "required": true},
+              {"name": "obtainedOn", "type": "date", "required": true},
+              {"name": "source", "type": "enum", "required": true, "values": ["SYSTEM_EXTRACT", "DOCUMENT", "INTERVIEW_NOTE", "THIRD_PARTY_CONFIRMATION", "RECALCULATION"]},
+              {"name": "description", "type": "text", "required": false}
+            ]},
+            {"name": "Engagement Independence", "cardinality": "one", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "declaredOn", "type": "date", "required": true},
+              {"name": "nonAuditServicesDisclosed", "type": "bool", "required": true},
+              {"name": "nonAuditServicesDescription", "type": "text", "required": false},
+              {"name": "auditorHoldsActiveMandate", "type": "bool", "required": true},
+              {"name": "assessedIndependent", "type": "enum", "required": true, "values": ["INDEPENDENT", "INDEPENDENT_WITH_MITIGATION", "NOT_INDEPENDENT", "UNDETERMINED"]}
+            ]}
+          ],
+          "rules": [
+            {"id": "ISB-GOV-AUD-01", "scope": "local", "assert": "cr.periodTo > cr.periodFrom && cr.plannedStartOn >= cr.periodFrom", "onViolation": "reject"},
+            {"id": "ISB-GOV-AUD-02", "scope": "local", "assert": "cr.opinionType != 'NOT_ISSUED' implies (cr.reportIssuedOn is not null && cr.fieldworkCompletedOn is not null && count(AuditEvidence) >= 1)", "onViolation": "reject", "rationale": "An opinion with no evidence row and no fieldwork date is an assertion, not an audit."},
+            {"id": "ISB-GOV-AUD-03", "scope": "local", "assert": "cr.sampleSize <= cr.populationSize && (cr.samplingMethod == 'FULL_POPULATION' implies cr.sampleSize == cr.populationSize) && (cr.samplingMethod == 'STATISTICAL' implies cr.selectionSeed is not null) && count(AuditSample) == cr.sampleSize", "onViolation": "reject", "rationale": "A statistical sample nobody can redraw, or a sample whose row count disagrees with its declared size, is not evidence."},
+            {"id": "ISB-GOV-AUD-04", "scope": "local", "assert": "count(AuditFinding where findingType == 'SHARIAH_NON_COMPLIANCE' && correlatedSncEventId is null) == 0", "onViolation": "flag", "rationale": "A non-compliance finding that never became an SNC event in the compliance-review domain is a finding that will never be quarantined or channelled. Flagged loudly; not rejected, because the auditor must be able to record the finding before the workflow catches up.", "emits": "audit.finding.snc.uncorrelated"},
+            {"id": "ISB-GOV-AUD-05", "scope": "local", "assert": "cr.externalAuditExemptionClaimed implies (cr.externalAuditExemptionReference is not null && cr.soaaAuditConfirmed == true)", "onViolation": "reject", "rationale": "AGEB Statement 1/2025 grants the external Shariah audit exemption only where the institution is audited under AAOIFI's SOAAs. Claiming it without naming the instrument and confirming the SOAA audit is the obvious abuse."},
+            {"id": "ISB-GOV-AUD-06", "scope": "local", "assert": "(cr.auditorOrgan == 'INTERNAL_SHARIAH_AUDIT' && EngagementIndependence.auditorHoldsActiveMandate) implies EngagementIndependence.assessedIndependent in ['INDEPENDENT','INDEPENDENT_WITH_MITIGATION']", "onViolation": "flag", "rationale": "Whether an internal Shariah auditor may concurrently sit on the SSB is jurisdictional (GS 11 against GS 19/20). Recorded and flagged; the catalog does not rule on it.", "emits": "audit.independence.concern"},
+            {"id": "ISB-GOV-AUD-07", "scope": "local", "assert": "all AuditFinding: (severity in ['CRITICAL','HIGH'] implies count(Remediation where findingId == findingId) >= 1)", "onViolation": "flag", "emits": "audit.finding.unremediated"},
+            {"id": "ISB-GOV-AUD-08", "scope": "local", "assert": "all Remediation: (status == 'DONE' implies (completedOn is not null && verifiedByEngagementId is not null)) && (status == 'ACCEPTED_RISK' implies acceptedRiskRulingId is not null)", "onViolation": "reject", "rationale": "A remediation closes when a later engagement verifies it, or when a ruling accepts the risk. The owner cannot close their own finding."},
+            {"id": "ISB-GOV-AUD-09", "scope": "local", "assert": "all Remediation: (status == 'OVERDUE') == (dueOn < now() && status not in ['DONE','ACCEPTED_RISK'])", "onViolation": "flag", "emits": "audit.remediation.overdue"},
+            {"id": "ISB-GOV-AUD-10", "scope": "local", "assert": "no in-place update of findingId, findingType, severity, raisedOn, citedStandardCode or citedClause once an AuditFinding row exists; no DELETE of any AuditFinding, Remediation or AuditEvidence row", "onViolation": "reject", "rationale": "DESIGN.md §5.8. A deleted finding is the defect this invariant exists to prevent."},
+            {"id": "ISB-GOV-AUD-11", "scope": "cross-domain", "dependsOn": ["isb-fatwa-and-ruling-repository"], "assert": "cr.opinionRulingId is null || effectiveAt(cr.opinionRulingId, cr.reportIssuedOn) == 'ISSUED'", "onViolation": "flag", "emits": "audit.opinion.ruling.unverified"},
+            {"id": "ISB-GOV-AUD-12", "scope": "local", "assert": "cr.status == 'REPORTED' implies cr.opinionType != 'NOT_ISSUED'", "onViolation": "reject"}
+          ],
+          "events": [
+            {"name": "audit.engagement.planned", "payload": "engagementId, auditType, auditorOrgan, periodFrom, periodTo, plannedStartOn, samplingMethod, populationSize, sampleSize"},
+            {"name": "audit.sample.drawn", "payload": "engagementId, sampleSize, samplingMethod, selectionSeed, drawnAt"},
+            {"name": "audit.finding.raised", "payload": "engagementId, findingId, severity, findingType, affectedServiceDomain, affectedEntityRef, citedStandardCode, citedClause, raisedOn"},
+            {"name": "audit.finding.snc.uncorrelated", "payload": "engagementId, findingId, affectedServiceDomain, observedAt"},
+            {"name": "audit.finding.closed", "payload": "engagementId, findingId, closedAt, verifiedByEngagementId"},
+            {"name": "audit.finding.unremediated", "payload": "engagementId, findingId, severity, observedAt"},
+            {"name": "audit.remediation.overdue", "payload": "engagementId, findingId, remediationId, ownerPartyId, dueOn, observedAt"},
+            {"name": "audit.opinion.issued", "payload": "engagementId, opinionType, reportIssuedOn, opinionRulingId, auditingFramework, externalAuditExemptionClaimed"},
+            {"name": "audit.independence.concern", "payload": "engagementId, auditorPartyId, auditorMandateId, assessedIndependent, observedAt"},
+            {"name": "audit.opinion.ruling.unverified", "payload": "engagementId, opinionRulingId, reportIssuedOn, reason"}
+          ],
+          "shariah": {
+            "contractType": null,
+            "contractTypeNote": "Not a contract. The assurance layer over every other domain; its samples point at their control records.",
+            "capitalAtRisk": false,
+            "reviewed": false,
+            "reviewStatus": "UNREVIEWED — requires named Shariah board sign-off",
+            "standards": [
+              {"body": "AAOIFI", "code": "GS 11", "title": "Internal Shari'ah Audit"},
+              {"body": "AAOIFI", "code": "GS 21", "title": "SSB Review and Report", "note": "Why the opinion is a ruling in the repository rather than a free-standing document."},
+              {"body": "AAOIFI", "code": "GS 1 (Revised 2024)", "title": "Shari'ah Governance Framework"},
+              {"body": "AAOIFI", "code": "SOAA 1", "title": "Framework of Auditing", "note": "Issued Jan 2026."},
+              {"body": "AAOIFI", "code": "SOAA 4", "title": "Auditing Requirements for Assessing Compliance with Shari'ah", "note": "Issued Jan 2026."},
+              {"body": "AAOIFI", "code": "AGN 3", "title": "Illustrative Auditor's Report", "note": "Auditing Guidance Note issued 8 Nov 2026."},
+              {"body": "AAOIFI", "code": "AGEB Statement 1/2025", "title": "External Shari'ah audit exemption", "note": "Issued 4 Jan 2026. Exemption from mandatory/preferred external Shariah audit where the institution is audited under AAOIFI's SOAAs — the basis for externalAuditExemptionClaimed + soaaAuditConfirmed."},
+              {"body": "IFSB", "code": "IFSB-30", "title": "Revised Guiding Principles on Corporate Governance for IIFS"},
+              {"body": "IFSB", "code": "IFSB-31", "title": "Guiding Principles for Effective Supervision of Shariah Governance", "note": "Principles 9-10 on non-compliance handling."}
+            ]
+          },
+          "uncertain": [
+            "Mandatory engagement frequency and minimum scope coverage. No primary text was obtained, so the catalog records period and scope rather than asserting a cycle.",
+            "Whether the opinion vocabulary (UNQUALIFIED / QUALIFIED / ADVERSE / DISCLAIMER) is the one AGN 3 prescribes. It is the conventional-audit vocabulary; AGN 3 was issued 8 Nov 2026 and its illustrative report was not read. This enum is the most likely thing in this entry to be wrong.",
+            "The internal-auditor / SSB-member independence bar. Flagged, never rejected, because it is jurisdictional.",
+            "Whether a disputed finding may be closed without SSB involvement. Modelled as a DISPUTED status with no automatic resolution."
+          ]
+        },
+
+        {
+          "name": "Income Purification",
+          "functionalPattern": "Process",
+          "assetType": "Purification Entry",
+          "arithmetic": "EXACT INTEGER ONLY. purificationDueMinor = round(baseAmountMinor * impermissibleRatioNum / impermissibleRatioDen, roundingPolicy), evaluated as an int64 multiply then divide (int128 or BigInteger intermediate to avoid overflow), with the rounding policy RECORDED on the row. No float, no double, no decimal string. The ratio is never converted to a quotient.",
+          "controlRecord": {
+            "name": "Purification Entry Procedure",
+            "table": "purification_entry_procedure",
+            "fields": [
+              {"name": "entryId", "type": "uuid", "required": true},
+              {"name": "subjectType", "type": "enum", "required": true, "values": ["EQUITY_HOLDING", "PORTFOLIO", "FUND", "INSTITUTION_INCOME", "CUSTOMER_ACCOUNT"]},
+              {"name": "subjectRef", "type": "string", "required": true},
+              {"name": "periodFrom", "type": "date", "required": true},
+              {"name": "periodTo", "type": "date", "required": true},
+              {"name": "methodCode", "type": "enum", "required": true, "values": ["RATIO_OF_IMPERMISSIBLE_REVENUE", "PER_SHARE_IMPERMISSIBLE_INCOME", "REALISED_INCOME_RATIO", "SSB_SPECIFIED"], "description": "Published sources genuinely conflict on the purification formula (per-share impermissible income against a ratio applied to received dividends plus realised gains) and on whether capital gains are purified at all. The method is therefore an SSB CHOICE recorded with a ruling, never a default."},
+              {"name": "methodRulingId", "type": "uuid", "required": true, "description": "Required. There is no default method, because choosing one in code would be the developer issuing a fatwa."},
+              {"name": "impermissibleRatio", "type": "ratio", "required": true, "description": "Exact num/den. 0 <= num <= den."},
+              {"name": "ratioSource", "type": "enum", "required": true, "values": ["ISSUER_DISCLOSURE", "INDEX_PROVIDER", "SSB_DETERMINATION", "COMPUTED_FROM_FINANCIALS"]},
+              {"name": "ratioSourceRef", "type": "string", "required": true},
+              {"name": "ratioAsOf", "type": "date", "required": true},
+              {"name": "baseAmount", "type": "money", "required": true},
+              {"name": "purificationDueAmount", "type": "money", "required": true},
+              {"name": "roundingPolicy", "type": "enum", "required": true, "values": ["ROUND_HALF_UP", "ROUND_HALF_EVEN", "ROUND_UP", "ROUND_DOWN"], "description": "Required, no default. Rounding a religious due is a Shariah choice, not an engineering preference. Recorded on every row so the figure is reproducible."},
+              {"name": "capitalGainsIncluded", "type": "bool", "required": true, "description": "Sources disagree. Recorded per entry rather than assumed."},
+              {"name": "status", "type": "enum", "required": true, "values": ["COMPUTED", "APPROVED", "CHANNELLED", "SUPERSEDED", "VOID"]},
+              {"name": "approvedByOrgan", "type": "enum", "required": false, "values": ["SHARIAH_COMPLIANCE_FUNCTION", "SSB"]},
+              {"name": "fundingAccountRef", "type": "string", "required": false},
+              {"name": "fundingAccountContractType", "type": "enum", "required": false, "values": ["Mudarabah", "Musharakah", "Wakala", "Wadiah", "QardHassan", "SHAREHOLDER_FUNDS", "SEGREGATED_LIABILITY", "CUSTOMER_OWN_FUNDS"]},
+              {"name": "charityPoolId", "type": "uuid", "required": false},
+              {"name": "channelledOn", "type": "date", "required": false},
+              {"name": "recognisedAsIncome", "type": "bool", "required": true, "description": "Must be false."},
+              {"name": "supersedesEntryId", "type": "uuid", "required": false},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "policyPortWired", "type": "bool", "required": true}
+            ],
+            "identifiers": [
+              {"field": "entryId", "kind": "primary"},
+              {"field": "subjectRef", "kind": "correlation"},
+              {"field": "methodRulingId", "kind": "foreign", "target": "isb-fatwa-and-ruling-repository"},
+              {"field": "charityPoolId", "kind": "foreign", "target": "isb-sadaqah-and-charity-management"},
+              {"field": "supersedesEntryId", "kind": "foreign", "target": "self"}
+            ],
+            "money": [
+              {"field": "baseAmount", "note": "int64 minor units, signed. Currency from ISO 4217 with the shared exponent table."},
+              {"field": "purificationDueAmount", "note": "int64 minor units. Recomputed server-side from baseAmount and the exact ratio; a client-supplied value that disagrees is rejected."}
+            ],
+            "ratios": [
+              {"field": "impermissibleRatio", "constraint": "den > 0 && 0 <= num <= den", "note": "Exact integer pair. Never a percentage, never a float."}
+            ]
+          },
+          "behaviourQualifiers": [
+            {"name": "Ratio Evidence", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "source", "type": "enum", "required": true, "values": ["ISSUER_DISCLOSURE", "INDEX_PROVIDER", "SSB_DETERMINATION", "COMPUTED_FROM_FINANCIALS"]},
+              {"name": "sourceRef", "type": "string", "required": true},
+              {"name": "asOf", "type": "date", "required": true},
+              {"name": "impermissibleRevenueAmount", "type": "money", "required": false},
+              {"name": "totalRevenueAmount", "type": "money", "required": false},
+              {"name": "derivedRatio", "type": "ratio", "required": false, "description": "num = impermissibleRevenue.minor, den = totalRevenue.minor. The ratio is DERIVED from two integers, never typed in as a percentage."},
+              {"name": "documentDigest", "type": "digest", "required": false}
+            ]},
+            {"name": "Purification Basis", "cardinality": "one", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "basisKind", "type": "enum", "required": true, "values": ["DIVIDEND_RECEIVED", "REALISED_GAIN", "TOTAL_RETURN", "GROSS_INCOME", "PER_SHARE"]},
+              {"name": "basisAmount", "type": "money", "required": true},
+              {"name": "shareCount", "type": "int64", "required": false, "description": "For PER_SHARE. Integer count; the per-share figure is amount-per-share as money, never a float."},
+              {"name": "perShareAmount", "type": "money", "required": false},
+              {"name": "inclusionOfCapitalGains", "type": "bool", "required": true},
+              {"name": "basisRulingId", "type": "uuid", "required": true}
+            ]},
+            {"name": "Charity Channelling", "cardinality": "many", "actionTerms": ["Execute", "Retrieve"], "fields": [
+              {"name": "charityPoolId", "type": "uuid", "required": true},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "channelledOn", "type": "date", "required": true},
+              {"name": "purposeCode", "type": "string", "required": true, "description": "A charity purpose code, NOT an asnaf (zakat) category. Purification is not zakat and its proceeds are not zakat funds."},
+              {"name": "evidenceRef", "type": "uri", "required": false},
+              {"name": "paymentOrderRef", "type": "string", "required": false}
+            ]},
+            {"name": "Purification Adjustment", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "adjustmentReason", "type": "enum", "required": true, "values": ["RATIO_RESTATED", "BASE_RESTATED", "METHOD_CHANGED", "PERIOD_RECLASSIFIED", "ROUNDING_CORRECTION"]},
+              {"name": "deltaAmount", "type": "money", "required": true, "description": "Signed int64 minor units. Provisional to final is TWO postings, never an update in place."},
+              {"name": "adjustedOn", "type": "date", "required": true},
+              {"name": "adjustmentRulingId", "type": "uuid", "required": false},
+              {"name": "note", "type": "text", "required": false}
+            ]}
+          ],
+          "rules": [
+            {"id": "ISB-GOV-PUR-01", "scope": "local", "assert": "cr.impermissibleRatio.den > 0 && cr.impermissibleRatio.num >= 0 && cr.impermissibleRatio.num <= cr.impermissibleRatio.den", "onViolation": "reject", "rationale": "A purification ratio outside [0,1] is nonsense, and a zero denominator is the classic division bug.", "testVectors": [{"name": "zero denominator refused", "given": "impermissibleRatio={num:1,den:0}", "expect": "422 ISB-GOV-PUR-01"}, {"name": "ratio above one refused", "given": "impermissibleRatio={num:101,den:100}", "expect": "422 ISB-GOV-PUR-01"}, {"name": "exact 5 percent accepted", "given": "impermissibleRatio={num:1,den:20}", "expect": "accepted"}]},
+            {"id": "ISB-GOV-PUR-02", "scope": "local", "assert": "cr.purificationDueAmount.currency == cr.baseAmount.currency && cr.purificationDueAmount.exponent == cr.baseAmount.exponent", "onViolation": "reject"},
+            {"id": "ISB-GOV-PUR-03", "scope": "local", "assert": "cr.purificationDueAmount.minor == round(cr.baseAmount.minor * cr.impermissibleRatio.num / cr.impermissibleRatio.den, cr.roundingPolicy)", "onViolation": "reject", "rationale": "The amount is recomputed server-side with integer arithmetic and the recorded rounding policy. A client-supplied figure that disagrees is refused, not accepted and logged. This is the generated self-check for the only arithmetic in the domain.", "testVectors": [{"name": "BHD 3-decimal, 5 percent, half up", "given": "baseAmount={minor:1000000,currency:BHD,exponent:3}, ratio={num:1,den:20}, roundingPolicy=ROUND_HALF_UP", "expect": "purificationDueAmount.minor == 50000"}, {"name": "JPY 0-decimal, 1/3, half up rounds to 34", "given": "baseAmount={minor:100,currency:JPY,exponent:0}, ratio={num:1,den:3}, roundingPolicy=ROUND_HALF_UP", "expect": "purificationDueAmount.minor == 33"}, {"name": "JPY 0-decimal, 1/3, round up", "given": "baseAmount={minor:100,currency:JPY,exponent:0}, ratio={num:1,den:3}, roundingPolicy=ROUND_UP", "expect": "purificationDueAmount.minor == 34"}, {"name": "USD 2-decimal, half even on an exact tie", "given": "baseAmount={minor:50,currency:USD,exponent:2}, ratio={num:1,den:4}, roundingPolicy=ROUND_HALF_EVEN", "expect": "purificationDueAmount.minor == 12"}, {"name": "no int64 overflow on a large base", "given": "baseAmount={minor:9000000000000000000,currency:USD,exponent:2}, ratio={num:999,den:1000}, roundingPolicy=ROUND_DOWN", "expect": "computed without overflow; intermediate is int128/BigInteger"}]},
+            {"id": "ISB-GOV-PUR-04", "scope": "cross-domain", "dependsOn": ["isb-fatwa-and-ruling-repository"], "assert": "effectiveAt(cr.methodRulingId, cr.periodTo) == 'ISSUED' && effectiveAt(PurificationBasis.basisRulingId, cr.periodTo) == 'ISSUED'", "onViolation": "flag", "rationale": "The method and the basis must each rest on a ruling effective over the period. Needs the repository; degrades to flag with policyPortWired false.", "emits": "purification.method.ruling.unverified"},
+            {"id": "ISB-GOV-PUR-05", "scope": "local", "assert": "cr.recognisedAsIncome == false && (cr.fundingAccountContractType is null || cr.fundingAccountContractType not in ['Mudarabah','Musharakah','Wakala'])", "onViolation": "reject", "rationale": "Purification amounts are never income, and never funded from an investment-account-holder pool. AAOIFI SS 13 §9/6: the Mudarib may not make a charitable donation out of Mudarabah funds."},
+            {"id": "ISB-GOV-PUR-06", "scope": "local", "assert": "sum(CharityChannelling.amount) <= cr.purificationDueAmount.minor && all CharityChannelling: (amount.currency == cr.purificationDueAmount.currency && amount.minor >= 0)", "onViolation": "reject"},
+            {"id": "ISB-GOV-PUR-07", "scope": "local", "assert": "cr.status == 'CHANNELLED' implies (cr.charityPoolId is not null && cr.channelledOn is not null && sum(CharityChannelling.amount) == cr.purificationDueAmount.minor)", "onViolation": "reject"},
+            {"id": "ISB-GOV-PUR-08", "scope": "local", "assert": "no in-place update of baseAmount, impermissibleRatio, purificationDueAmount, methodCode, roundingPolicy or periodFrom/periodTo once cr.status != 'COMPUTED'", "onViolation": "reject", "rationale": "A restatement is a PurificationAdjustment row or a superseding entry — two postings, never an edit. DESIGN.md §5.8."},
+            {"id": "ISB-GOV-PUR-09", "scope": "local", "assert": "cr.supersedesEntryId is null || status(cr.supersedesEntryId) == 'SUPERSEDED'", "onViolation": "reject"},
+            {"id": "ISB-GOV-PUR-10", "scope": "local", "assert": "all RatioEvidence: (derivedRatio is null || (impermissibleRevenueAmount.currency == totalRevenueAmount.currency && derivedRatio.num == impermissibleRevenueAmount.minor && derivedRatio.den == totalRevenueAmount.minor && totalRevenueAmount.minor > 0))", "onViolation": "reject", "rationale": "A derived ratio must be exactly the two disclosed integers, same currency. Any rounding here would silently change the obligation."},
+            {"id": "ISB-GOV-PUR-11", "scope": "local", "assert": "PurificationBasis.basisKind == 'PER_SHARE' implies (PurificationBasis.shareCount > 0 && PurificationBasis.perShareAmount is not null && PurificationBasis.basisAmount.minor == PurificationBasis.perShareAmount.minor * PurificationBasis.shareCount)", "onViolation": "reject", "rationale": "The per-share method reconciles exactly in integers or it is refused. A per-share figure that does not multiply back is a float that got in."},
+            {"id": "ISB-GOV-PUR-12", "scope": "local", "assert": "cr.periodTo > cr.periodFrom && cr.ratioAsOf <= cr.periodTo", "onViolation": "reject", "rationale": "A ratio dated after the period it purifies is evidence from the future."}
+          ],
+          "events": [
+            {"name": "purification.ratio.recorded", "payload": "entryId, subjectRef, source, sourceRef, asOf, derivedRatio, documentDigest"},
+            {"name": "purification.computed", "payload": "entryId, subjectType, subjectRef, periodFrom, periodTo, methodCode, methodRulingId, impermissibleRatio, baseAmount, purificationDueAmount, roundingPolicy, capitalGainsIncluded"},
+            {"name": "purification.approved", "payload": "entryId, approvedByOrgan, approvedAt"},
+            {"name": "purification.channelled", "payload": "entryId, charityPoolId, amount, channelledOn, purposeCode, paymentOrderRef"},
+            {"name": "purification.adjusted", "payload": "entryId, adjustmentReason, deltaAmount, adjustedOn, adjustmentRulingId"},
+            {"name": "purification.superseded", "payload": "entryId, supersededByEntryId, supersededAt"},
+            {"name": "purification.method.ruling.unverified", "payload": "entryId, methodRulingId, periodTo, reason"}
+          ],
+          "shariah": {
+            "contractType": null,
+            "contractTypeNote": "Not a contract. An obligation arising from holding an asset with some impermissible income.",
+            "capitalAtRisk": false,
+            "reviewed": false,
+            "reviewStatus": "UNREVIEWED — requires named Shariah board sign-off. The formula itself is not settled in the published sources behind this design, so every field here is a container for an SSB's choice, not a choice.",
+            "standards": [
+              {"body": "AAOIFI", "code": "SS 21", "title": "Financial Paper (Shares and Bonds)", "note": "The business-activity and financial-ratio screening context. The 30/30/5 thresholds and the purification formula attributed to it in commentary were NOT verified against the primary text in the research behind this design. Nothing here asserts them."},
+              {"body": "AAOIFI", "code": "SS 13", "clause": "§9/6", "title": "Mudarabah", "note": "The Mudarib may not make a loan, gift or charitable donation out of Mudarabah funds — the basis for ISB-GOV-PUR-05."},
+              {"body": "AAOIFI", "code": "GS 9", "title": "Shari'ah Compliance Function", "note": "The organ that approves an entry."}
+            ]
+          },
+          "uncertain": [
+            "THE FORMULA. Published sources conflict on whether purification is a ratio applied to received dividends plus realised gains, or a per-share impermissible income figure, and on whether capital gains are purified at all. The catalog models all of them as methodCode + a required methodRulingId and asserts NONE. This is the single largest honest gap in this entry.",
+            "AAOIFI SS 21's thresholds. Secondary sources only; not asserted.",
+            "The rounding policy for a religious due. Required field, no default. Rounding down favours the holder and rounding up favours the charity; the catalog does not choose.",
+            "Whether an institution may purify on a customer's behalf or may only inform. Modelled only through subjectType and the funding account; the Zakat Calculation domain carries the explicit payerRole field for the equivalent question and this domain probably needs the same field once an SSB rules on it. Reported rather than invented.",
+            "Whether purification proceeds and late-payment charity may share a charity pool. The charity domain tags every inflow with its sourceCategory and restricts use by source, which keeps the question answerable later without a migration."
+          ]
+        },
+
+        {
+          "name": "Zakat Calculation",
+          "functionalPattern": "Process",
+          "assetType": "Zakat Assessment",
+          "arithmetic": "EXACT INTEGER ONLY, four steps, each reproducible from the stored row:\n  1. nisabValueMinor   = round(metalSpotPrice.minor * nisabMassMilligrams / spotPriceMassBasisMilligrams, roundingPolicy)\n  2. netZakatableMinor = zakatableBaseAmount.minor - deductibleLiabilitiesAmount.minor\n  3. nisabMet          = netZakatableMinor >= nisabValueMinor\n  4. zakatDueMinor     = nisabMet ? round(netZakatableMinor * zakatRate.num / zakatRate.den, roundingPolicy) : 0\nThe rate is an EXACT ratio: 1/40 on a lunar (Hijri) basis. The often-quoted solar figure of ~2.577% is exactly 1/40 * 365/354 = 365/14160, so it too is an exact ratio and is stored as one — a float here would quietly change a religious due. Masses are int64 MILLIGRAMS (595 g = 595000 mg), so no decimal mass ever appears.",
+          "controlRecord": {
+            "name": "Zakat Assessment Procedure",
+            "table": "zakat_assessment_procedure",
+            "fields": [
+              {"name": "assessmentId", "type": "uuid", "required": true},
+              {"name": "subjectType", "type": "enum", "required": true, "values": ["INSTITUTION", "CUSTOMER_PARTY", "CUSTOMER_ACCOUNT", "FUND"]},
+              {"name": "subjectRef", "type": "string", "required": true},
+              {"name": "baseMethod", "type": "enum", "required": true, "values": ["NET_ASSETS", "NET_INVESTED_FUNDS"], "description": "AAOIFI FAS 9 permitted both. FAS 39 'Financial reporting for Zakah' (from exposure draft F5/2019 v5.1, 8 July 2020) records that the Shariah standard only provided net assets and DROPS net invested funds. NET_INVESTED_FUNDS therefore needs a ruling and a legacy note."},
+              {"name": "baseMethodRulingId", "type": "uuid", "required": true},
+              {"name": "legacyBasisNote", "type": "text", "required": false},
+              {"name": "calendarBasis", "type": "enum", "required": true, "values": ["HIJRI_LUNAR", "GREGORIAN_SOLAR"], "description": "The obligation remains attached to the Hijri calendar; a solar basis is a reporting convenience that changes the rate."},
+              {"name": "hawlStartsOn", "type": "date", "required": true},
+              {"name": "hawlEndsOn", "type": "date", "required": true},
+              {"name": "hawlDays", "type": "int32", "required": true, "description": "354 for a full lunar year per AAOIFI SS 35 as cited by ZATCA. A lunar year is 354 or 355 days in practice, so this is recorded, checked loosely and flagged — never silently normalised."},
+              {"name": "zakatRate", "type": "ratio", "required": true, "description": "Exact. 1/40 on HIJRI_LUNAR; 365/14160 on GREGORIAN_SOLAR (= 1/40 * 365/354). Never 0.025 and never 2.5."},
+              {"name": "zakatRateRulingId", "type": "uuid", "required": false, "description": "Required only to override the standard rate for the recorded calendar basis."},
+              {"name": "nisabMetal", "type": "enum", "required": true, "values": ["SILVER", "GOLD"]},
+              {"name": "nisabMassMilligrams", "type": "int64", "required": true, "description": "Integer milligrams. 595 g silver = 595000. The gold figure diverges across sources (85 g against 87.48 g) and the silver figure across sources too (595 g against 612.36 g); only the silver 595 g is traceable to a primary citation, so this is a SOURCED PARAMETER, never a constant in code."},
+              {"name": "nisabMassSource", "type": "enum", "required": true, "values": ["AAOIFI_SS_35_VIA_ZATCA", "SSB_PARAMETER", "REGULATOR", "OTHER"]},
+              {"name": "nisabMassSourceRef", "type": "string", "required": true},
+              {"name": "metalSpotPrice", "type": "money", "required": true},
+              {"name": "spotPriceMassBasisMilligrams", "type": "int64", "required": true, "description": "What mass metalSpotPrice is the price OF (e.g. 1000000 for a price per kilogram). Makes step 1 a pure integer ratio."},
+              {"name": "metalSpotPriceSource", "type": "string", "required": true},
+              {"name": "metalSpotPriceAsOf", "type": "timestamp", "required": true},
+              {"name": "nisabValue", "type": "money", "required": true},
+              {"name": "zakatableBaseAmount", "type": "money", "required": true},
+              {"name": "deductibleLiabilitiesAmount", "type": "money", "required": true},
+              {"name": "netZakatableAmount", "type": "money", "required": true},
+              {"name": "nisabMet", "type": "bool", "required": true},
+              {"name": "zakatDueAmount", "type": "money", "required": true},
+              {"name": "roundingPolicy", "type": "enum", "required": true, "values": ["ROUND_HALF_UP", "ROUND_HALF_EVEN", "ROUND_UP", "ROUND_DOWN"], "description": "Required, no default."},
+              {"name": "payerRole", "type": "enum", "required": true, "values": ["BANK_PAYS_ON_BEHALF", "BANK_INFORMS_ONLY", "BANK_REMITS_TO_AUTHORITY"], "description": "Required. The research is explicit: state plainly whether the bank pays on the customer's behalf or only informs. An assessment that does not say is a misleading document."},
+              {"name": "advisoryOnly", "type": "bool", "required": true, "description": "True for a customer assessment presented as a computation with visible inputs rather than as a determination of the customer's religious obligation."},
+              {"name": "status", "type": "enum", "required": true, "values": ["DRAFT", "COMPUTED", "CERTIFIED", "SUPERSEDED", "VOID"]},
+              {"name": "supersedesAssessmentId", "type": "uuid", "required": false},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "policyPortWired", "type": "bool", "required": true}
+            ],
+            "identifiers": [
+              {"field": "assessmentId", "kind": "primary"},
+              {"field": "subjectRef", "kind": "correlation"},
+              {"field": "baseMethodRulingId", "kind": "foreign", "target": "isb-fatwa-and-ruling-repository"},
+              {"field": "zakatRateRulingId", "kind": "foreign", "target": "isb-fatwa-and-ruling-repository"},
+              {"field": "supersedesAssessmentId", "kind": "foreign", "target": "self"}
+            ],
+            "money": [
+              {"field": "metalSpotPrice", "note": "Price of spotPriceMassBasisMilligrams of the metal. int64 minor units."},
+              {"field": "nisabValue", "note": "Derived, int64 minor units."},
+              {"field": "zakatableBaseAmount"},
+              {"field": "deductibleLiabilitiesAmount"},
+              {"field": "netZakatableAmount", "note": "Derived. May be negative; signed int64 is required."},
+              {"field": "zakatDueAmount", "note": "Derived. Zero when nisab is not met."}
+            ],
+            "ratios": [
+              {"field": "zakatRate", "constraint": "den > 0 && 0 <= num <= den", "note": "1/40 lunar, 365/14160 solar. Exact."}
+            ]
+          },
+          "behaviourQualifiers": [
+            {"name": "Zakatable Asset Line", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "lineCode", "type": "string", "required": true},
+              {"name": "assetClass", "type": "enum", "required": true, "values": ["CASH_AND_EQUIVALENTS", "RECEIVABLES", "INVENTORY_TRADE_GOODS", "INVESTMENTS", "PRECIOUS_METALS", "INVESTMENT_PROPERTY", "OTHER"]},
+              {"name": "grossAmount", "type": "money", "required": true},
+              {"name": "inclusionRatio", "type": "ratio", "required": true, "description": "Exact. 1/1 for fully zakatable, 0/1 for excluded, and a partial ratio where the SSB rules one applies."},
+              {"name": "includedAmount", "type": "money", "required": true},
+              {"name": "valuationBasis", "type": "enum", "required": true, "values": ["MARKET", "BOOK", "CONSTRUCTIVE"]},
+              {"name": "sourceRef", "type": "string", "required": true}
+            ]},
+            {"name": "Deductible Liability Line", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "lineCode", "type": "string", "required": true},
+              {"name": "liabilityClass", "type": "enum", "required": true, "values": ["CURRENT_PAYABLE", "SHORT_TERM_FINANCING", "ACCRUED_EXPENSE", "OTHER"]},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "deductibilityRulingId", "type": "uuid", "required": false},
+              {"name": "sourceRef", "type": "string", "required": true}
+            ]},
+            {"name": "Nisab Reference", "cardinality": "one", "actionTerms": ["Record", "Retrieve", "Update"], "fields": [
+              {"name": "metal", "type": "enum", "required": true, "values": ["SILVER", "GOLD"]},
+              {"name": "massMilligrams", "type": "int64", "required": true},
+              {"name": "massSource", "type": "enum", "required": true, "values": ["AAOIFI_SS_35_VIA_ZATCA", "SSB_PARAMETER", "REGULATOR", "OTHER"]},
+              {"name": "massSourceRef", "type": "string", "required": true},
+              {"name": "divergenceNote", "type": "text", "required": false, "description": "e.g. 'Gold nisab is quoted as 85 g and as 87.48 g; silver as 595 g and as 612.36 g. Only silver 595 g (200 dirhams, AAOIFI SS 35 p.874 as cited by ZATCA) is traceable to a primary citation here.'"},
+              {"name": "spotPrice", "type": "money", "required": true},
+              {"name": "spotPriceMassBasisMilligrams", "type": "int64", "required": true},
+              {"name": "spotPriceSource", "type": "string", "required": true},
+              {"name": "spotPriceAsOf", "type": "timestamp", "required": true}
+            ]},
+            {"name": "Hawl Observation", "cardinality": "many", "actionTerms": ["Capture", "Retrieve"], "fields": [
+              {"name": "observedOn", "type": "date", "required": true},
+              {"name": "balanceAtObservation", "type": "money", "required": true},
+              {"name": "nisabValueAtObservation", "type": "money", "required": true},
+              {"name": "aboveNisab", "type": "bool", "required": true}
+            ]},
+            {"name": "Zakat Certificate", "cardinality": "many", "actionTerms": ["Execute", "Retrieve"], "fields": [
+              {"name": "certificateRef", "type": "string", "required": true},
+              {"name": "issuedOn", "type": "date", "required": true},
+              {"name": "issuedToPartyId", "type": "string", "required": true},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "payerRoleStated", "type": "enum", "required": true, "values": ["BANK_PAYS_ON_BEHALF", "BANK_INFORMS_ONLY", "BANK_REMITS_TO_AUTHORITY"]},
+              {"name": "methodStated", "type": "text", "required": true, "description": "The certificate must carry the method, the nisab source, the spot price and its asOf. A bare number is not usable for religious compliance and is not defensible."},
+              {"name": "documentDigest", "type": "digest", "required": true}
+            ]}
+          ],
+          "rules": [
+            {"id": "ISB-GOV-ZKT-01", "scope": "local", "assert": "(cr.calendarBasis == 'HIJRI_LUNAR' implies (cr.zakatRate.num * 40 == cr.zakatRate.den || cr.zakatRateRulingId is not null)) && (cr.calendarBasis == 'GREGORIAN_SOLAR' implies (cr.zakatRate.num * 14160 == cr.zakatRate.den * 365 || cr.zakatRateRulingId is not null))", "onViolation": "reject", "rationale": "Cross-multiplied so the check is exact integer equality with no division. 1/40 lunar, 365/14160 solar; any other rate needs a ruling.", "testVectors": [{"name": "lunar 1/40 accepted", "given": "calendarBasis=HIJRI_LUNAR, zakatRate={num:1,den:40}", "expect": "accepted"}, {"name": "lunar 25/1000 accepted (same exact ratio)", "given": "calendarBasis=HIJRI_LUNAR, zakatRate={num:25,den:1000}", "expect": "accepted"}, {"name": "solar 365/14160 accepted", "given": "calendarBasis=GREGORIAN_SOLAR, zakatRate={num:365,den:14160}", "expect": "accepted"}, {"name": "lunar 2.577 percent without a ruling refused", "given": "calendarBasis=HIJRI_LUNAR, zakatRate={num:365,den:14160}, zakatRateRulingId=null", "expect": "422 ISB-GOV-ZKT-01"}]},
+            {"id": "ISB-GOV-ZKT-02", "scope": "local", "assert": "cr.nisabValue.minor == round(cr.metalSpotPrice.minor * cr.nisabMassMilligrams / cr.spotPriceMassBasisMilligrams, cr.roundingPolicy) && cr.nisabValue.currency == cr.metalSpotPrice.currency", "onViolation": "reject", "testVectors": [{"name": "silver 595 g at BHD 850.000 per kg", "given": "metalSpotPrice={minor:850000,currency:BHD,exponent:3}, spotPriceMassBasisMilligrams=1000000, nisabMassMilligrams=595000, roundingPolicy=ROUND_HALF_UP", "expect": "nisabValue.minor == 505750"}, {"name": "JPY 0-decimal per kg", "given": "metalSpotPrice={minor:140000,currency:JPY,exponent:0}, spotPriceMassBasisMilligrams=1000000, nisabMassMilligrams=595000, roundingPolicy=ROUND_HALF_UP", "expect": "nisabValue.minor == 83300"}]},
+            {"id": "ISB-GOV-ZKT-03", "scope": "local", "assert": "cr.netZakatableAmount.minor == cr.zakatableBaseAmount.minor - cr.deductibleLiabilitiesAmount.minor && cr.zakatableBaseAmount.currency == cr.deductibleLiabilitiesAmount.currency && cr.netZakatableAmount.currency == cr.zakatableBaseAmount.currency", "onViolation": "reject"},
+            {"id": "ISB-GOV-ZKT-04", "scope": "local", "assert": "cr.nisabMet == (cr.netZakatableAmount.minor >= cr.nisabValue.minor) && cr.nisabValue.currency == cr.netZakatableAmount.currency", "onViolation": "reject", "rationale": "A nisab comparison across two currencies is the bug that silently makes everyone liable or nobody."},
+            {"id": "ISB-GOV-ZKT-05", "scope": "local", "assert": "cr.zakatDueAmount.minor == (cr.nisabMet ? round(cr.netZakatableAmount.minor * cr.zakatRate.num / cr.zakatRate.den, cr.roundingPolicy) : 0)", "onViolation": "reject", "rationale": "The generated self-check for the whole computation.", "testVectors": [{"name": "below nisab means zero due", "given": "nisabMet=false, netZakatableAmount={minor:100000,currency:USD,exponent:2}", "expect": "zakatDueAmount.minor == 0"}, {"name": "BHD 3-decimal lunar rate", "given": "nisabMet=true, netZakatableAmount={minor:1000000,currency:BHD,exponent:3}, zakatRate={num:1,den:40}, roundingPolicy=ROUND_HALF_UP", "expect": "zakatDueAmount.minor == 25000"}, {"name": "JPY 0-decimal lunar rate rounds", "given": "nisabMet=true, netZakatableAmount={minor:1001,currency:JPY,exponent:0}, zakatRate={num:1,den:40}, roundingPolicy=ROUND_HALF_UP", "expect": "zakatDueAmount.minor == 25"}, {"name": "negative net is below nisab", "given": "netZakatableAmount={minor:-5000,currency:USD,exponent:2}, nisabValue={minor:50000,currency:USD,exponent:2}", "expect": "nisabMet == false && zakatDueAmount.minor == 0"}]},
+            {"id": "ISB-GOV-ZKT-06", "scope": "local", "assert": "cr.nisabMassSourceRef is not null && cr.metalSpotPriceSource is not null && cr.metalSpotPriceAsOf is not null && count(NisabReference) == 1", "onViolation": "reject", "rationale": "A nisab with no source and no asOf is a constant someone typed. The divergence across published figures (85 g against 87.48 g gold; 595 g against 612.36 g silver) is exactly why this is refused rather than defaulted."},
+            {"id": "ISB-GOV-ZKT-07", "scope": "local", "assert": "cr.baseMethod == 'NET_INVESTED_FUNDS' implies (cr.legacyBasisNote is not null && cr.baseMethodRulingId is not null)", "onViolation": "reject", "rationale": "FAS 39 drops the net-invested-funds method. Using it is a deliberate legacy choice that must name its authority."},
+            {"id": "ISB-GOV-ZKT-08", "scope": "local", "assert": "cr.payerRole is not null && all ZakatCertificate: (payerRoleStated == cr.payerRole && methodStated is not null)", "onViolation": "reject", "rationale": "A certificate that does not say whether the bank paid or merely informed, and on what method, is a misleading document."},
+            {"id": "ISB-GOV-ZKT-09", "scope": "local", "assert": "all ZakatableAssetLine: (inclusionRatio.den > 0 && inclusionRatio.num >= 0 && inclusionRatio.num <= inclusionRatio.den && includedAmount.minor == round(grossAmount.minor * inclusionRatio.num / inclusionRatio.den, cr.roundingPolicy) && includedAmount.currency == grossAmount.currency)", "onViolation": "reject"},
+            {"id": "ISB-GOV-ZKT-10", "scope": "local", "assert": "cr.zakatableBaseAmount.minor == sum(ZakatableAssetLine.includedAmount) && cr.deductibleLiabilitiesAmount.minor == sum(DeductibleLiabilityLine.amount)", "onViolation": "reject", "rationale": "The base must be the sum of its visible lines. The research is explicit that a zakat API should expose the method and the inputs, not a single opaque number."},
+            {"id": "ISB-GOV-ZKT-11", "scope": "local", "assert": "cr.hawlEndsOn > cr.hawlStartsOn && (cr.calendarBasis == 'HIJRI_LUNAR' implies cr.hawlDays in [354, 355])", "onViolation": "flag", "rationale": "A lunar year is 354 or 355 days. Flagged, not rejected, and the Hijri conversion itself is NOT generated — see notDerivable.", "emits": "zakat.hawl.length.unexpected"},
+            {"id": "ISB-GOV-ZKT-12", "scope": "local", "assert": "count(HawlObservation where aboveNisab == false) == 0", "onViolation": "flag", "rationale": "Zakat requires stable ownership above nisab for a full hawl. A dip below is recorded and flagged; whether it breaks the hawl is an SSB question, not this service's.", "emits": "zakat.hawl.interrupted"},
+            {"id": "ISB-GOV-ZKT-13", "scope": "local", "assert": "no in-place update of any money field, zakatRate, nisabMassMilligrams, metalSpotPrice, baseMethod, roundingPolicy or calendarBasis once cr.status in ['COMPUTED','CERTIFIED']", "onViolation": "reject", "rationale": "A revision is a new assessment with supersedesAssessmentId. A certificate already in a customer's hands must stay reproducible. DESIGN.md §5.8."},
+            {"id": "ISB-GOV-ZKT-14", "scope": "cross-domain", "dependsOn": ["isb-fatwa-and-ruling-repository"], "assert": "effectiveAt(cr.baseMethodRulingId, cr.hawlEndsOn) == 'ISSUED'", "onViolation": "flag", "emits": "zakat.method.ruling.unverified"},
+            {"id": "ISB-GOV-ZKT-15", "scope": "local", "assert": "cr.advisoryOnly == true || cr.subjectType == 'INSTITUTION'", "onViolation": "flag", "rationale": "A customer-facing assessment presented as a determination rather than an advisory computation is the one output of this domain most likely to be read as a religious ruling.", "emits": "zakat.customer.assessment.not.advisory"}
+          ],
+          "events": [
+            {"name": "zakat.nisab.parameter.updated", "payload": "metal, massMilligrams, massSource, massSourceRef, spotPrice, spotPriceMassBasisMilligrams, spotPriceSource, spotPriceAsOf"},
+            {"name": "zakat.assessment.computed", "payload": "assessmentId, subjectType, subjectRef, baseMethod, calendarBasis, hawlStartsOn, hawlEndsOn, zakatRate, nisabMetal, nisabMassMilligrams, nisabValue, zakatableBaseAmount, deductibleLiabilitiesAmount, netZakatableAmount, nisabMet, zakatDueAmount, roundingPolicy, payerRole"},
+            {"name": "zakat.assessment.below.nisab", "payload": "assessmentId, subjectRef, netZakatableAmount, nisabValue, computedAt"},
+            {"name": "zakat.assessment.certified", "payload": "assessmentId, certificateRef, issuedOn, issuedToPartyId, amount, payerRoleStated, documentDigest"},
+            {"name": "zakat.assessment.superseded", "payload": "assessmentId, supersededByAssessmentId, supersededAt"},
+            {"name": "zakat.hawl.length.unexpected", "payload": "assessmentId, calendarBasis, hawlStartsOn, hawlEndsOn, hawlDays"},
+            {"name": "zakat.hawl.interrupted", "payload": "assessmentId, observedOn, balanceAtObservation, nisabValueAtObservation"},
+            {"name": "zakat.method.ruling.unverified", "payload": "assessmentId, baseMethodRulingId, hawlEndsOn, reason"},
+            {"name": "zakat.customer.assessment.not.advisory", "payload": "assessmentId, subjectType, subjectRef, observedAt"}
+          ],
+          "shariah": {
+            "contractType": null,
+            "contractTypeNote": "Not a contract. Zakat is an obligation; the bank computes, certifies and (depending on payerRole) remits.",
+            "capitalAtRisk": false,
+            "reviewed": false,
+            "reviewStatus": "UNREVIEWED — requires named Shariah board sign-off",
+            "standards": [
+              {"body": "AAOIFI", "code": "SS 35", "title": "Zakah", "note": "Nisab and rate as cited by ZATCA's 'Zakat Collection' publication at p.874 of the Shari'ah Standards: silver nisab 200 dirhams = 595 g; hawl = a full lunar year (354 days); rate 2.5% lunar, approximately 2.577% on a solar basis because of the day-count difference, with the obligation itself remaining attached to the Hijri calendar. The primary AAOIFI text was NOT read directly in the research behind this design — the citation is via ZATCA."},
+              {"body": "AAOIFI", "code": "FAS 39", "title": "Financial reporting for Zakah", "note": "From exposure draft F5/2019 v5.1, 8 July 2020. Records that the Shariah standard only provided the net assets method and drops net invested funds. Supersedes FAS 9 in substance."},
+              {"body": "AAOIFI", "code": "FAS 9", "title": "Zakah", "note": "The legacy standard that permitted both bases. Retained in the enum only so a legacy choice can be recorded with its justification."},
+              {"body": "REGULATOR", "code": "ZATCA 'Zakat Collection'", "note": "The secondary source through which the SS 35 nisab and rate figures reached this design. Named explicitly rather than laundered into 'per AAOIFI'."}
+            ]
+          },
+          "uncertain": [
+            "The nisab mass itself. Gold is quoted as 85 g and as 87.48 g; silver as 595 g and as 612.36 g. Only silver 595 g is traceable to a primary citation here, and that via ZATCA rather than the AAOIFI text. Modelled as a sourced, dated parameter with a divergenceNote, and the service refuses an assessment that has no source.",
+            "Whether the solar rate is permissible at all. The catalog stores it as the exact ratio 365/14160 and keeps the obligation attached to the Hijri calendar through calendarBasis, but whether an institution may assess on a Gregorian year is an SSB question.",
+            "Hijri/Gregorian conversion and the 354-vs-355-day year. Not generated (see notDerivable); hawlDays is recorded and flagged.",
+            "Which liabilities are deductible. Modelled as lines with an optional deductibilityRulingId; the catalog asserts nothing.",
+            "Whether a dip below nisab during the hawl breaks the obligation. Recorded and flagged, never decided.",
+            "The rounding policy for the due. Required, no default.",
+            "Whether a bank may compute a customer's personal zakat at all, as opposed to reporting the balances. advisoryOnly and payerRole make the institution's position explicit; they do not resolve the question."
+          ]
+        },
+
+        {
+          "name": "Zakat Distribution",
+          "functionalPattern": "Distribute",
+          "assetType": "Zakat Disbursement",
+          "arithmetic": "EXACT INTEGER CONSERVATION. Every minor unit that enters the fund leaves it as an allocation, an administrative deduction or a declared residual — nothing is lost to rounding silently. Allocation weights are exact ratios summed over a common denominator (sum(num_i * L / den_i) == L where L = lcm of the denominators), never floats summed to 0.9999.",
+          "controlRecord": {
+            "name": "Zakat Disbursement Distribution",
+            "table": "zakat_disbursement_distribution",
+            "fields": [
+              {"name": "disbursementId", "type": "uuid", "required": true},
+              {"name": "sourceAssessmentId", "type": "uuid", "required": false, "description": "Null for a pooled run funded by many assessments; the FundInflow rows then carry the provenance."},
+              {"name": "fundPoolId", "type": "string", "required": true},
+              {"name": "currency", "type": "iso4217", "required": true, "description": "A distribution run is single-currency. Cross-currency is two runs, because converting a religious due needs a recorded rate and a ruling."},
+              {"name": "periodFrom", "type": "date", "required": true},
+              {"name": "periodTo", "type": "date", "required": true},
+              {"name": "totalAvailableAmount", "type": "money", "required": true},
+              {"name": "totalAllocatedAmount", "type": "money", "required": true},
+              {"name": "totalDisbursedAmount", "type": "money", "required": true},
+              {"name": "residualAmount", "type": "money", "required": true, "description": "Explicit. Every unit lost to rounding lands here; it is never absorbed into the last allocation."},
+              {"name": "residualHandling", "type": "enum", "required": true, "values": ["CARRY_FORWARD", "REALLOCATE", "RETURN_TO_FUND"]},
+              {"name": "allocationBasis", "type": "enum", "required": true, "values": ["ASNAF_CATEGORY_WEIGHTS", "REGULATOR_DIRECTED", "SSB_DIRECTED", "SINGLE_BENEFICIARY", "REMITTED_TO_AUTHORITY"]},
+              {"name": "allocationRulingId", "type": "uuid", "required": true},
+              {"name": "zakatAuthorityId", "type": "string", "required": false},
+              {"name": "remittedToAuthority", "type": "bool", "required": true, "description": "Several jurisdictions require remittance to a national zakat authority rather than direct distribution. Where true, the beneficiary allocation is the authority's responsibility, not this service's."},
+              {"name": "segregatedAccountRef", "type": "string", "required": true},
+              {"name": "segregatedAccountContractType", "type": "enum", "required": true, "values": ["Wadiah", "QardHassan", "SEGREGATED_LIABILITY", "TRUST_ACCOUNT"], "description": "Zakat funds are held, not invested. An investment-account contract type here is refused by ISB-GOV-ZDS-05."},
+              {"name": "roundingPolicy", "type": "enum", "required": true, "values": ["ROUND_HALF_UP", "ROUND_HALF_EVEN", "ROUND_UP", "ROUND_DOWN"]},
+              {"name": "status", "type": "enum", "required": true, "values": ["PLANNED", "ALLOCATED", "DISBURSING", "COMPLETED", "RETURNED", "VOID"]},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "policyPortWired", "type": "bool", "required": true}
+            ],
+            "identifiers": [
+              {"field": "disbursementId", "kind": "primary"},
+              {"field": "sourceAssessmentId", "kind": "foreign", "target": "isb-zakat-calculation"},
+              {"field": "allocationRulingId", "kind": "foreign", "target": "isb-fatwa-and-ruling-repository"},
+              {"field": "fundPoolId", "kind": "natural"},
+              {"field": "segregatedAccountRef", "kind": "correlation"}
+            ],
+            "money": [
+              {"field": "totalAvailableAmount"},
+              {"field": "totalAllocatedAmount"},
+              {"field": "totalDisbursedAmount"},
+              {"field": "residualAmount"}
+            ],
+            "ratios": []
+          },
+          "behaviourQualifiers": [
+            {"name": "Fund Inflow", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "inflowId", "type": "uuid", "required": true},
+              {"name": "sourceType", "type": "enum", "required": true, "values": ["INSTITUTION_OWN_ZAKAT", "CUSTOMER_ZAKAT", "THIRD_PARTY_ZAKAT", "CARRIED_FORWARD_RESIDUAL"]},
+              {"name": "sourceRef", "type": "string", "required": true},
+              {"name": "sourceAssessmentId", "type": "uuid", "required": false},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "receivedOn", "type": "date", "required": true}
+            ]},
+            {"name": "Beneficiary Allocation", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Evaluate"], "fields": [
+              {"name": "allocationId", "type": "uuid", "required": true},
+              {"name": "asnafCategory", "type": "enum", "required": true, "values": ["FUQARA", "MASAKIN", "AMILIN", "MUALLAF", "RIQAB", "GHARIMIN", "FI_SABILILLAH", "IBN_AS_SABIL"], "description": "The eight classical categories of Qur'an 9:60. No AAOIFI or IFSB clause for this list was obtained in the research behind this design — see uncertain. Eligibility against a category is NEVER determined by this service."},
+              {"name": "weight", "type": "ratio", "required": true, "description": "Exact. Weights sum to exactly 1 over a common denominator."},
+              {"name": "allocatedAmount", "type": "money", "required": true},
+              {"name": "beneficiaryType", "type": "enum", "required": true, "values": ["INDIVIDUAL", "INSTITUTION", "AUTHORITY", "PROGRAMME"]},
+              {"name": "beneficiaryRef", "type": "string", "required": true},
+              {"name": "eligibilityRulingId", "type": "uuid", "required": false},
+              {"name": "eligibilityVerifiedOn", "type": "date", "required": false},
+              {"name": "eligibilityVerifiedByOrgan", "type": "enum", "required": false, "values": ["SHARIAH_COMPLIANCE_FUNCTION", "SSB", "ZAKAT_AUTHORITY", "EXTERNAL_PARTNER"]}
+            ]},
+            {"name": "Administrative Deduction", "cardinality": "one", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "permitted", "type": "bool", "required": true, "description": "Whether the institution may take an Amilin (collector's) share of the funds it administers. A live scholarly and jurisdictional question, so it is a recorded decision with a ruling, never a default."},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "basis", "type": "ratio", "required": true},
+              {"name": "cap", "type": "ratio", "required": false},
+              {"name": "rulingId", "type": "uuid", "required": false}
+            ]},
+            {"name": "Disbursement", "cardinality": "many", "actionTerms": ["Execute", "Retrieve", "Record"], "fields": [
+              {"name": "disbursementLineId", "type": "uuid", "required": true},
+              {"name": "allocationId", "type": "uuid", "required": true},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "paymentOrderRef", "type": "string", "required": false},
+              {"name": "disbursedOn", "type": "date", "required": false},
+              {"name": "status", "type": "enum", "required": true, "values": ["PENDING", "SENT", "SETTLED", "FAILED", "RETURNED"]},
+              {"name": "failureReason", "type": "text", "required": false}
+            ]},
+            {"name": "Returned Funds", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "reason", "type": "enum", "required": true, "values": ["BENEFICIARY_UNREACHABLE", "PAYMENT_FAILED", "INELIGIBLE_ON_REVIEW", "DUPLICATE", "OTHER"]},
+              {"name": "returnedOn", "type": "date", "required": true},
+              {"name": "returnedToFundPoolId", "type": "string", "required": true}
+            ]}
+          ],
+          "rules": [
+            {"id": "ISB-GOV-ZDS-01", "scope": "local", "assert": "cr.totalAvailableAmount.minor == sum(BeneficiaryAllocation.allocatedAmount) + AdministrativeDeduction.amount.minor + cr.residualAmount.minor", "onViolation": "reject", "rationale": "The conservation rule. Every minor unit is accounted for, including the rounding residue, which is why residualAmount is a field rather than a comment.", "testVectors": [{"name": "BHD 3-decimal three-way split with residue", "given": "totalAvailableAmount={minor:1000,currency:BHD,exponent:3}, three allocations of weight 1/3 at ROUND_DOWN giving 333 each, AdministrativeDeduction.amount.minor=0", "expect": "residualAmount.minor == 1 and the run is accepted"}, {"name": "JPY 0-decimal run that loses a unit is refused", "given": "totalAvailableAmount={minor:100,currency:JPY,exponent:0}, allocations summing to 99, residualAmount.minor=0", "expect": "422 ISB-GOV-ZDS-01"}]},
+            {"id": "ISB-GOV-ZDS-02", "scope": "local", "assert": "cr.allocationBasis == 'ASNAF_CATEGORY_WEIGHTS' implies sum_exact_ratio(BeneficiaryAllocation.weight) == 1", "onViolation": "reject", "rationale": "Summed over a common denominator in integers. Floats summing to 0.99999999 is the bug this rule exists for.", "testVectors": [{"name": "1/2 + 1/3 + 1/6 sums to exactly one", "given": "weights [{1,2},{1,3},{1,6}]", "expect": "accepted"}, {"name": "three thirds as 0.33 each is refused", "given": "weights [{33,100},{33,100},{33,100}]", "expect": "422 ISB-GOV-ZDS-02"}]},
+            {"id": "ISB-GOV-ZDS-03", "scope": "local", "assert": "all BeneficiaryAllocation: (allocatedAmount.currency == cr.currency && allocatedAmount.minor >= 0 && sum(Disbursement.amount where allocationId == allocationId) <= allocatedAmount.minor)", "onViolation": "reject"},
+            {"id": "ISB-GOV-ZDS-04", "scope": "local", "assert": "all FundInflow: amount.currency == cr.currency && all Disbursement: amount.currency == cr.currency && cr.totalAvailableAmount.currency == cr.currency", "onViolation": "reject", "rationale": "One currency per run. Converting zakat needs a recorded rate and a ruling, so it is a separate run, not an implicit conversion."},
+            {"id": "ISB-GOV-ZDS-05", "scope": "local", "assert": "cr.segregatedAccountRef is not null && cr.segregatedAccountContractType in ['Wadiah','QardHassan','SEGREGATED_LIABILITY','TRUST_ACCOUNT']", "onViolation": "reject", "rationale": "Zakat funds are segregated and not commingled with the institution's own income or with an investment-account-holder pool. AAOIFI SS 13 §9/6 forbids charitable disbursement out of Mudarabah funds."},
+            {"id": "ISB-GOV-ZDS-06", "scope": "local", "assert": "(AdministrativeDeduction.permitted == false implies AdministrativeDeduction.amount.minor == 0) && (AdministrativeDeduction.permitted == true implies AdministrativeDeduction.rulingId is not null) && (AdministrativeDeduction.cap is null || AdministrativeDeduction.basis.num * AdministrativeDeduction.cap.den <= AdministrativeDeduction.cap.num * AdministrativeDeduction.basis.den)", "onViolation": "reject", "rationale": "An institution taking a cut of zakat it administers needs a named ruling and must stay inside the recorded cap. The cap comparison is cross-multiplied so it is exact integer arithmetic."},
+            {"id": "ISB-GOV-ZDS-07", "scope": "local", "assert": "count(BeneficiaryAllocation where asnafCategory == 'AMILIN' && beneficiaryRef == cr.fundPoolId) == 0 || AdministrativeDeduction.rulingId is not null", "onViolation": "reject", "rationale": "Allocating to AMILIN where the beneficiary is the administering institution itself is the administrative deduction wearing a different hat. It needs the same ruling."},
+            {"id": "ISB-GOV-ZDS-08", "scope": "local", "assert": "cr.totalDisbursedAmount.minor == sum(Disbursement.amount where status in ['SENT','SETTLED']) - sum(ReturnedFunds.amount)", "onViolation": "reject"},
+            {"id": "ISB-GOV-ZDS-09", "scope": "local", "assert": "cr.status == 'COMPLETED' implies (cr.totalDisbursedAmount.minor + cr.residualAmount.minor + AdministrativeDeduction.amount.minor == cr.totalAvailableAmount.minor)", "onViolation": "reject", "rationale": "A completed run reconciles to the minor unit or it is not completed."},
+            {"id": "ISB-GOV-ZDS-10", "scope": "local", "assert": "cr.remittedToAuthority implies (cr.zakatAuthorityId is not null && cr.allocationBasis == 'REMITTED_TO_AUTHORITY' && count(BeneficiaryAllocation where beneficiaryType != 'AUTHORITY') == 0)", "onViolation": "reject", "rationale": "Where funds go to a national zakat authority, this service must not also pretend to have chosen beneficiaries."},
+            {"id": "ISB-GOV-ZDS-11", "scope": "local", "assert": "all BeneficiaryAllocation: (beneficiaryType == 'INDIVIDUAL' implies (eligibilityVerifiedOn is not null && eligibilityVerifiedByOrgan is not null))", "onViolation": "flag", "rationale": "Eligibility is verified by a person or an authority, never derived by this service. The flag records the gap rather than inventing a determination.", "emits": "zakat.beneficiary.eligibility.unverified"},
+            {"id": "ISB-GOV-ZDS-12", "scope": "local", "assert": "no in-place update of any money field, weight, asnafCategory or allocationBasis once cr.status != 'PLANNED'; no DELETE of a FundInflow, BeneficiaryAllocation, Disbursement or ReturnedFunds row", "onViolation": "reject", "rationale": "DESIGN.md §5.8."},
+            {"id": "ISB-GOV-ZDS-13", "scope": "cross-domain", "dependsOn": ["isb-zakat-calculation"], "assert": "all FundInflow: (sourceAssessmentId is null || status(sourceAssessmentId) in ['COMPUTED','CERTIFIED'])", "onViolation": "flag", "emits": "zakat.inflow.assessment.unverified"},
+            {"id": "ISB-GOV-ZDS-14", "scope": "cross-domain", "dependsOn": ["isb-sadaqah-and-charity-management"], "assert": "no FundInflow or Disbursement references a charity pool managed by isb-sadaqah-and-charity-management", "onViolation": "reject", "rationale": "Zakat and sadaqah/purification/SNC charity funds are different funds with different permitted uses. Commingling them is the mistake a shared 'charity' table would make inevitable."}
+          ],
+          "events": [
+            {"name": "zakat.fund.inflow.recorded", "payload": "disbursementId, inflowId, sourceType, sourceRef, sourceAssessmentId, amount, receivedOn"},
+            {"name": "zakat.allocation.approved", "payload": "disbursementId, allocationBasis, allocationRulingId, totalAllocatedAmount, allocationCount, approvedAt"},
+            {"name": "zakat.disbursement.executed", "payload": "disbursementId, disbursementLineId, allocationId, asnafCategory, amount, paymentOrderRef, disbursedOn"},
+            {"name": "zakat.disbursement.failed", "payload": "disbursementId, disbursementLineId, amount, failureReason, observedAt"},
+            {"name": "zakat.funds.returned", "payload": "disbursementId, amount, reason, returnedOn, returnedToFundPoolId"},
+            {"name": "zakat.residual.carried.forward", "payload": "disbursementId, residualAmount, residualHandling, periodTo"},
+            {"name": "zakat.remitted.to.authority", "payload": "disbursementId, zakatAuthorityId, amount, remittedOn"},
+            {"name": "zakat.beneficiary.eligibility.unverified", "payload": "disbursementId, allocationId, beneficiaryRef, asnafCategory, observedAt"},
+            {"name": "zakat.inflow.assessment.unverified", "payload": "disbursementId, inflowId, sourceAssessmentId, reason"},
+            {"name": "zakat.distribution.completed", "payload": "disbursementId, totalAvailableAmount, totalDisbursedAmount, residualAmount, completedAt"}
+          ],
+          "shariah": {
+            "contractType": null,
+            "contractTypeNote": "Not a contract. The institution holds zakat funds as a custodian (Wadiah or a trust account) and distributes or remits them.",
+            "capitalAtRisk": false,
+            "reviewed": false,
+            "reviewStatus": "UNREVIEWED — requires named Shariah board sign-off",
+            "standards": [
+              {"body": "AAOIFI", "code": "SS 35", "title": "Zakah", "note": "Via the ZATCA citation; see Zakat Calculation. The distribution categories themselves were not read from this text."},
+              {"body": "AAOIFI", "code": "FAS 39", "title": "Financial reporting for Zakah"},
+              {"body": "AAOIFI", "code": "SS 13", "clause": "§9/6", "title": "Mudarabah", "note": "The basis for refusing an investment-account contract type on the segregated zakat account."},
+              {"body": "CLASSICAL_SOURCE", "code": "Qur'an 9:60", "note": "The classical basis for the eight asnaf categories. Recorded as the source of the enum precisely because no AAOIFI or IFSB clause for the list was obtained in the research behind this design."}
+            ]
+          },
+          "uncertain": [
+            "The asnaf category list. The eight categories of Qur'an 9:60 are well established, but no AAOIFI or IFSB clause enumerating them was obtained here, and the transliterations chosen for the enum are a convention. Treat the enum as a container an SSB confirms, not as a citation.",
+            "Whether an institution may take an Amilin share of funds it administers. Modelled as permitted + rulingId + cap, with permitted required and no default.",
+            "Whether residual funds may be carried forward across a hawl boundary. residualHandling records the choice; the catalog does not rule.",
+            "Eligibility determination. Never computed. Flagged when unverified.",
+            "Whether a distribution must be completed within the same period as the assessment. periodFrom/periodTo are recorded; no deadline is asserted.",
+            "Jurisdictions that mandate remittance to a national zakat authority. Modelled through remittedToAuthority and zakatAuthorityId; the list of such jurisdictions is not in the catalog and would be policy data."
+          ]
+        },
+
+        {
+          "name": "Sadaqah And Charity Management",
+          "functionalPattern": "Manage",
+          "assetType": "Charity Pool",
+          "designNote": "THIS POOL IS NOT ONE POOL. It receives late-payment charity (AAOIFI SS 3 §2/1/8), quarantined Shariah non-compliant income, income-purification proceeds and voluntary sadaqah — and the permitted USE of each differs by its SOURCE. Every inflow is therefore source-tagged, a PermittedUsePolicy row says what each source may fund, and no outflow may draw more from a source bucket than that bucket received. Zakat is explicitly NOT here: it has its own fund, its own categories and its own service.",
+          "controlRecord": {
+            "name": "Charity Pool Management Plan",
+            "table": "charity_pool_management_plan",
+            "fields": [
+              {"name": "poolId", "type": "uuid", "required": true},
+              {"name": "poolName", "type": "string", "required": true},
+              {"name": "custodianUnit", "type": "string", "required": true},
+              {"name": "currency", "type": "iso4217", "required": true},
+              {"name": "segregatedAccountRef", "type": "string", "required": true},
+              {"name": "segregatedAccountContractType", "type": "enum", "required": true, "values": ["Wadiah", "QardHassan", "SEGREGATED_LIABILITY", "TRUST_ACCOUNT"]},
+              {"name": "openingBalance", "type": "money", "required": true},
+              {"name": "currentBalance", "type": "money", "required": true, "description": "DERIVED from the append-only PoolBalanceMovement ledger. The generated repository exposes no setter; rule ISB-GOV-CHR-01 refuses a direct write."},
+              {"name": "disbursementApprovalOrgan", "type": "enum", "required": true, "values": ["SHARIAH_COMPLIANCE_FUNCTION", "SSB", "BOARD_COMMITTEE"]},
+              {"name": "governanceRulingId", "type": "uuid", "required": true},
+              {"name": "commingleWithZakat", "type": "bool", "required": true, "description": "Must be false. Present as a field so the invariant is assertable instead of implicit."},
+              {"name": "reportingPeriodicity", "type": "enum", "required": true, "values": ["MONTHLY", "QUARTERLY", "SEMI_ANNUAL", "ANNUAL"]},
+              {"name": "status", "type": "enum", "required": true, "values": ["ACTIVE", "FROZEN", "CLOSED"]},
+              {"name": "closedOn", "type": "date", "required": false},
+              {"name": "createdAt", "type": "timestamp", "required": true},
+              {"name": "policyPortWired", "type": "bool", "required": true}
+            ],
+            "identifiers": [
+              {"field": "poolId", "kind": "primary"},
+              {"field": "governanceRulingId", "kind": "foreign", "target": "isb-fatwa-and-ruling-repository"},
+              {"field": "segregatedAccountRef", "kind": "correlation"}
+            ],
+            "money": [
+              {"field": "openingBalance"},
+              {"field": "currentBalance", "note": "Derived from the movement ledger, never written directly."}
+            ],
+            "ratios": []
+          },
+          "behaviourQualifiers": [
+            {"name": "Charity Inflow", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "inflowId", "type": "uuid", "required": true},
+              {"name": "sourceCategory", "type": "enum", "required": true, "values": ["LATE_PAYMENT_CHARITY", "SNC_QUARANTINED_INCOME", "INCOME_PURIFICATION", "VOLUNTARY_SADAQAH", "DORMANT_UNCLAIMED", "OTHER"], "description": "Permitted use differs by source. This tag is what makes that enforceable."},
+              {"name": "sourceRef", "type": "string", "required": true},
+              {"name": "sourceServiceDomain", "type": "string", "required": true},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "receivedOn", "type": "date", "required": true},
+              {"name": "originContractType", "type": "enum", "required": false, "values": ["Mudarabah", "Musharakah", "Wakala", "Wadiah", "QardHassan", "Murabaha", "Ijara", "IjaraMuntahiaBittamleek", "Istisna", "Salam", "Tawarruq", "Ujrah", "SHAREHOLDER_FUNDS", "NONE"]},
+              {"name": "originAccountRef", "type": "string", "required": false},
+              {"name": "lateChargeKind", "type": "enum", "required": false, "values": ["TAAWIDH_ACTUAL_LOSS", "GHARAMAH_PENALTY_TO_CHARITY", "CHARITY_UNDERTAKING"], "description": "AAOIFI SS 3 distinguishes recovery of actual costs (§2/1/4) from the debtor's charity undertaking (§2/1/8). Recovery of actual costs is NOT charity and must not arrive here."},
+              {"name": "approvedByRulingId", "type": "uuid", "required": false},
+              {"name": "recognisedAsIncome", "type": "bool", "required": true, "description": "Must be false."}
+            ]},
+            {"name": "Permitted Use Policy", "cardinality": "many", "actionTerms": ["Register", "Retrieve", "Control"], "fields": [
+              {"name": "sourceCategory", "type": "enum", "required": true, "values": ["LATE_PAYMENT_CHARITY", "SNC_QUARANTINED_INCOME", "INCOME_PURIFICATION", "VOLUNTARY_SADAQAH", "DORMANT_UNCLAIMED", "OTHER"]},
+              {"name": "purposeCode", "type": "string", "required": true},
+              {"name": "permitted", "type": "bool", "required": true},
+              {"name": "beneficiaryTypePermitted", "type": "enum", "required": false, "values": ["INDIVIDUAL", "INSTITUTION", "PROGRAMME", "AUTHORITY"]},
+              {"name": "approvedByRulingId", "type": "uuid", "required": true},
+              {"name": "effectiveFrom", "type": "date", "required": true},
+              {"name": "effectiveTo", "type": "date", "required": false}
+            ]},
+            {"name": "Charity Outflow", "cardinality": "many", "actionTerms": ["Request", "Execute", "Retrieve"], "fields": [
+              {"name": "outflowId", "type": "uuid", "required": true},
+              {"name": "sourceCategoryDrawn", "type": "enum", "required": true, "values": ["LATE_PAYMENT_CHARITY", "SNC_QUARANTINED_INCOME", "INCOME_PURIFICATION", "VOLUNTARY_SADAQAH", "DORMANT_UNCLAIMED", "OTHER"]},
+              {"name": "purposeCode", "type": "string", "required": true},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "beneficiaryType", "type": "enum", "required": true, "values": ["INDIVIDUAL", "INSTITUTION", "PROGRAMME", "AUTHORITY"]},
+              {"name": "beneficiaryRef", "type": "string", "required": true},
+              {"name": "approvedByOrgan", "type": "enum", "required": true, "values": ["SHARIAH_COMPLIANCE_FUNCTION", "SSB", "BOARD_COMMITTEE"]},
+              {"name": "approvalRef", "type": "string", "required": true},
+              {"name": "paymentOrderRef", "type": "string", "required": false},
+              {"name": "disbursedOn", "type": "date", "required": false},
+              {"name": "status", "type": "enum", "required": true, "values": ["REQUESTED", "APPROVED", "SENT", "SETTLED", "FAILED", "REJECTED"]},
+              {"name": "beneficiaryIsRelatedParty", "type": "bool", "required": true, "description": "Charity flowing to a related party of the institution is the obvious abuse of a pool funded by penalties and non-compliant income."}
+            ]},
+            {"name": "Pool Balance Movement", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "movementId", "type": "uuid", "required": true},
+              {"name": "occurredAt", "type": "timestamp", "required": true},
+              {"name": "sequenceNumber", "type": "int64", "required": true, "description": "Monotonic per pool. The ledger's order is data, not insertion luck."},
+              {"name": "direction", "type": "enum", "required": true, "values": ["IN", "OUT"]},
+              {"name": "sourceCategory", "type": "enum", "required": true, "values": ["LATE_PAYMENT_CHARITY", "SNC_QUARANTINED_INCOME", "INCOME_PURIFICATION", "VOLUNTARY_SADAQAH", "DORMANT_UNCLAIMED", "OTHER"]},
+              {"name": "amount", "type": "money", "required": true},
+              {"name": "balanceAfter", "type": "money", "required": true},
+              {"name": "inflowId", "type": "uuid", "required": false},
+              {"name": "outflowId", "type": "uuid", "required": false}
+            ]},
+            {"name": "Attestation", "cardinality": "many", "actionTerms": ["Record", "Retrieve"], "fields": [
+              {"name": "periodFrom", "type": "date", "required": true},
+              {"name": "periodTo", "type": "date", "required": true},
+              {"name": "attestedByOrgan", "type": "enum", "required": true, "values": ["SHARIAH_COMPLIANCE_FUNCTION", "SSB", "INTERNAL_SHARIAH_AUDIT", "EXTERNAL_AUDITOR"]},
+              {"name": "attestedOn", "type": "date", "required": true},
+              {"name": "openingBalance", "type": "money", "required": true},
+              {"name": "closingBalance", "type": "money", "required": true},
+              {"name": "documentRef", "type": "uri", "required": false},
+              {"name": "documentDigest", "type": "digest", "required": true}
+            ]}
+          ],
+          "rules": [
+            {"id": "ISB-GOV-CHR-01", "scope": "local", "assert": "cr.currentBalance.minor == cr.openingBalance.minor + sum(PoolBalanceMovement.amount where direction == 'IN') - sum(PoolBalanceMovement.amount where direction == 'OUT') && no direct write of cr.currentBalance", "onViolation": "reject", "rationale": "The balance is a fold of an append-only ledger. A settable balance is how a charity pool quietly loses money."},
+            {"id": "ISB-GOV-CHR-02", "scope": "local", "assert": "all PoolBalanceMovement: (amount.currency == cr.currency && balanceAfter.currency == cr.currency) && all CharityInflow: amount.currency == cr.currency && all CharityOutflow: amount.currency == cr.currency", "onViolation": "reject", "rationale": "One currency per pool. A cross-currency charity pool needs a recorded conversion and a ruling, so it is a second pool."},
+            {"id": "ISB-GOV-CHR-03", "scope": "local", "assert": "all CharityInflow: (recognisedAsIncome == false && (sourceCategory in ['LATE_PAYMENT_CHARITY','SNC_QUARANTINED_INCOME','INCOME_PURIFICATION'] implies originContractType not in ['Mudarabah','Musharakah','Wakala']))", "onViolation": "reject", "rationale": "Charity, penalty and quarantined income never enter P&L, and are never funded from an investment-account-holder pool. AAOIFI SS 13 §9/6: the Mudarib may not make a loan, gift or charitable donation out of Mudarabah funds."},
+            {"id": "ISB-GOV-CHR-04", "scope": "local", "assert": "all CharityInflow: lateChargeKind != 'TAAWIDH_ACTUAL_LOSS'", "onViolation": "reject", "rationale": "Ta'widh — recovery of the actual costs directly incurred (AAOIFI SS 3 §2/1/4) — is a cost recovery, not charity. Admitting it here would quietly convert a recoverable cost into a donation, or worse, a penalty into income."},
+            {"id": "ISB-GOV-CHR-05", "scope": "local", "assert": "all CharityOutflow: exists(PermittedUsePolicy where sourceCategory == sourceCategoryDrawn && purposeCode == purposeCode && permitted == true && effectiveFrom <= disbursedOn && (effectiveTo is null || effectiveTo >= disbursedOn))", "onViolation": "reject", "rationale": "Permitted use is DATA, per source category, effective-dated, each row approved by a ruling. There is no hardcoded notion of what charity money may fund."},
+            {"id": "ISB-GOV-CHR-06", "scope": "local", "assert": "for each sourceCategory: sum(PoolBalanceMovement.amount where direction == 'OUT' && sourceCategory == c) <= sum(PoolBalanceMovement.amount where direction == 'IN' && sourceCategory == c)", "onViolation": "reject", "rationale": "No borrowing across source buckets. Spending purification money on a purpose only permitted for voluntary sadaqah is exactly what a single undifferentiated balance would allow.", "testVectors": [{"name": "cannot spend SNC bucket from the sadaqah bucket", "given": "IN VOLUNTARY_SADAQAH 1000, OUT SNC_QUARANTINED_INCOME 1", "expect": "422 ISB-GOV-CHR-06"}, {"name": "within-bucket spend accepted", "given": "IN SNC_QUARANTINED_INCOME {minor:1000,currency:BHD,exponent:3}, OUT SNC_QUARANTINED_INCOME {minor:1000,currency:BHD,exponent:3}", "expect": "accepted"}]},
+            {"id": "ISB-GOV-CHR-07", "scope": "local", "assert": "cr.commingleWithZakat == false && count(CharityInflow where sourceServiceDomain == 'isb-zakat-distribution') == 0 && count(CharityInflow where sourceServiceDomain == 'isb-zakat-calculation') == 0", "onViolation": "reject", "rationale": "Zakat has its own fund, its own eight categories and its own service. A zakat inflow arriving here is a routing bug with a religious consequence."},
+            {"id": "ISB-GOV-CHR-08", "scope": "local", "assert": "all CharityOutflow: (status in ['APPROVED','SENT','SETTLED'] implies (approvalRef is not null && approvedByOrgan == cr.disbursementApprovalOrgan))", "onViolation": "reject"},
+            {"id": "ISB-GOV-CHR-09", "scope": "local", "assert": "count(CharityOutflow where beneficiaryIsRelatedParty == true) == 0", "onViolation": "flag", "rationale": "A pool funded by penalties and non-compliant income paying a related party is the headline risk. Flagged and evented rather than rejected, because a legitimate related charitable foundation exists in some groups — but it is never silent.", "emits": "charity.related.party.outflow"},
+            {"id": "ISB-GOV-CHR-10", "scope": "local", "assert": "all PoolBalanceMovement: ((direction == 'IN') == (inflowId is not null)) && ((direction == 'OUT') == (outflowId is not null)) && sequenceNumber is unique per pool and strictly increasing with occurredAt", "onViolation": "reject", "rationale": "Every movement is traceable to exactly one inflow or outflow, and the ledger order is explicit rather than dependent on insertion order."},
+            {"id": "ISB-GOV-CHR-11", "scope": "local", "assert": "all Attestation: closingBalance.minor == openingBalance.minor + sum(PoolBalanceMovement.amount where occurredAt in [periodFrom, periodTo] && direction == 'IN') - sum(PoolBalanceMovement.amount where occurredAt in [periodFrom, periodTo] && direction == 'OUT')", "onViolation": "reject", "rationale": "An attestation that does not reconcile against the ledger it attests to is worse than none.", "emits": "charity.balance.reconciliation.failed"},
+            {"id": "ISB-GOV-CHR-12", "scope": "local", "assert": "no in-place update of amount, sourceCategory, direction, balanceAfter or sequenceNumber on any PoolBalanceMovement, CharityInflow or CharityOutflow row; no DELETE of any of them", "onViolation": "reject", "rationale": "DESIGN.md §5.8. A correction is a reversing movement."},
+            {"id": "ISB-GOV-CHR-13", "scope": "cross-domain", "dependsOn": ["isb-fatwa-and-ruling-repository"], "assert": "all PermittedUsePolicy: effectiveAt(approvedByRulingId, effectiveFrom) == 'ISSUED'", "onViolation": "flag", "emits": "charity.use.policy.ruling.unverified"},
+            {"id": "ISB-GOV-CHR-14", "scope": "local", "assert": "cr.status == 'CLOSED' implies (cr.currentBalance.minor == 0 && cr.closedOn is not null)", "onViolation": "reject", "rationale": "A closed pool with money in it is money nobody owns."}
+          ],
+          "events": [
+            {"name": "charity.pool.opened", "payload": "poolId, poolName, currency, segregatedAccountRef, segregatedAccountContractType, disbursementApprovalOrgan, governanceRulingId"},
+            {"name": "charity.inflow.recorded", "payload": "poolId, inflowId, sourceCategory, sourceRef, sourceServiceDomain, amount, receivedOn, originContractType, lateChargeKind"},
+            {"name": "charity.use.policy.activated", "payload": "poolId, sourceCategory, purposeCode, permitted, approvedByRulingId, effectiveFrom, effectiveTo"},
+            {"name": "charity.outflow.requested", "payload": "poolId, outflowId, sourceCategoryDrawn, purposeCode, amount, beneficiaryType, beneficiaryRef"},
+            {"name": "charity.outflow.approved", "payload": "poolId, outflowId, approvedByOrgan, approvalRef, approvedAt"},
+            {"name": "charity.outflow.disbursed", "payload": "poolId, outflowId, amount, paymentOrderRef, disbursedOn"},
+            {"name": "charity.related.party.outflow", "payload": "poolId, outflowId, beneficiaryRef, amount, observedAt"},
+            {"name": "charity.balance.reconciliation.failed", "payload": "poolId, periodFrom, periodTo, expectedClosingBalance, attestedClosingBalance, observedAt"},
+            {"name": "charity.pool.attested", "payload": "poolId, periodFrom, periodTo, attestedByOrgan, attestedOn, openingBalance, closingBalance, documentDigest"},
+            {"name": "charity.use.policy.ruling.unverified", "payload": "poolId, sourceCategory, purposeCode, approvedByRulingId, reason"},
+            {"name": "charity.pool.closed", "payload": "poolId, closedOn, finalBalance"}
+          ],
+          "shariah": {
+            "contractType": null,
+            "contractTypeNote": "Not a contract. The institution holds these funds as a custodian; segregatedAccountContractType is restricted to Wadiah, Qard Hassan, a segregated liability or a trust account precisely so the pool is never an investment.",
+            "capitalAtRisk": false,
+            "reviewed": false,
+            "reviewStatus": "UNREVIEWED — requires named Shariah board sign-off",
+            "standards": [
+              {"body": "AAOIFI", "code": "SS 3", "clause": "§2/1/4, §2/1/8", "title": "Procrastinating Debtor (Revised)", "note": "§2/1/4 recovery of actual costs directly incurred (ta'widh) — NOT charity, refused by ISB-GOV-CHR-04. §2/1/8 the debtor's undertaking to donate on default — the LATE_PAYMENT_CHARITY source. Originally issued 31 May 2000; amendments adopted at Board meeting No. 38, 26-28 June 2014."},
+              {"body": "AAOIFI", "code": "SS 13", "clause": "§9/6", "title": "Mudarabah", "note": "The Mudarib may not make a loan, gift or charitable donation out of Mudarabah funds — the basis for ISB-GOV-CHR-03."},
+              {"body": "AAOIFI", "code": "SS 19", "clause": "§9/1, §9/2", "title": "Qard", "note": "Service charges on Qard are limited to the actual amount directly spent, with the method laid down in detail by the Supervisory Board, and exclude indirect expenses. Relevant where a Qard Hassan account is the pool's custody vehicle."},
+              {"body": "AAOIFI", "code": "GS 9", "title": "Shari'ah Compliance Function", "note": "The organ that approves an outflow."},
+              {"body": "AAOIFI", "code": "GS 21", "title": "SSB Review and Report", "note": "The attestation BQ."},
+              {"body": "IFSB", "code": "IFSB-22", "title": "Revised Standard on Disclosures to Promote Transparency and Market Discipline for IIFS (Banking Segment)", "note": "Adopted Dec 2018; supersedes IFSB-4. The disclosure target the pool's reporting projections serve. Its Table 7/8 and Templates 10-12 shapes were NOT read directly in the research behind this design."}
+            ]
+          },
+          "uncertain": [
+            "Whether a late-payment charity undertaking is permissible at all. AAOIFI SS 3 §2/1/8 permits it; stricter opinions reject it. The catalog records the undertaking and its ruling; it does not take a side. The gharamah-against-ta'widh distinction is modelled as lateChargeKind for exactly this reason.",
+            "Whether purification proceeds, SNC-quarantined income and voluntary sadaqah may share one pool. Modelled as one pool with hard per-source buckets and a per-source permitted-use matrix, so an SSB can split them later without a data migration. This is a design bet, not a ruling.",
+            "What charity money may actually fund. Entirely data (PermittedUsePolicy); the catalog ships no purpose codes at all.",
+            "Whether a related-party charitable foundation may receive these funds. Flagged, never decided.",
+            "Dormant and unclaimed balances. Included as a source category because they commonly end up in such a pool, but the treatment is jurisdictional (often an unclaimed-property regime rather than a Shariah question) and nothing here asserts it is charity.",
+            "IFSB-22's disclosure templates. Cited as the reporting target; the primary tables were not read (the IFSB standards pages are WAF-protected and several PDFs are scanned), so no reporting projection shape is specified in this entry."
+          ]
+        }
+
+      ]
+    }
+  ]
+}
